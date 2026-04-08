@@ -1,0 +1,47 @@
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || '/api';
+
+const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add auth token to requests
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Auth APIs
+export const authAPI = {
+  firebaseLogin: (idToken, googleAccessToken) => api.post('/auth/firebase-login', { idToken, googleAccessToken }),
+  getGmailAuthUrl: () => api.get('/auth/gmail/url'),
+  connectGmail: (tokens) => api.post('/auth/gmail/connect', { tokens }),
+  getProfile: () => api.get('/auth/profile'),
+  logout: () => api.post('/auth/logout'),
+};
+
+// Email APIs
+export const emailAPI = {
+  fetchEmails: () => api.get('/emails/fetch'),
+  syncEmails: () => api.get('/emails/sync'),
+  getEmails: (params = {}) => api.get('/emails', { params }),
+  getEmailById: (id) => api.get(`/emails/${id}`),
+  getStats: () => api.get('/emails/stats'),
+  classifyEmails: () => api.post('/emails/classify'),
+  summarizeEmail: (id) => api.post(`/emails/${id}/summarize`),
+  sendReply: (id, body) => api.post(`/emails/${id}/reply/send`, { body }),
+
+  aiSummarize: (id) => api.post(`/emails/ai/${id}/summarize`),
+  aiClassify: (id) => api.post(`/emails/ai/${id}/classify`),
+  aiGenerateReply: (id, tone = 'professional') => api.post(`/emails/ai/${id}/reply`, { tone }),
+  aiProcessAll: () => api.post('/emails/ai/process-all'),
+};
+
+export default api;

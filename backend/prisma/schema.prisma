@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  name             String?
+  profileImage     String?   @map("profile_image")
+  oauthProvider    String?   @map("oauth_provider")
+  firebaseUid      String?   @map("firebase_uid")
+  accessToken      String?   @db.Text @map("access_token")
+  refreshToken     String?   @db.Text @map("refresh_token")
+  tokenExpiry      DateTime? @map("token_expiry")
+  gmailConnectedAt DateTime? @map("gmail_connected_at")
+  lastLogin        DateTime? @map("last_login")
+  lastSyncAt       DateTime? @map("last_sync_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  emails           Email[]
+  aiLogs           AILog[]
+
+  @@map("users")
+}
+
+model Email {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  messageId      String?   @unique @map("message_id")
+  threadId       String?   @map("thread_id")
+  subject        String?
+  body           String?   @db.Text
+  snippet        String?
+  summary        String?   @db.Text
+  priority       String    @default("normal")
+  category       String    @default("general")
+  labels         String[]  @default([])
+  actionRequired Boolean   @default(false) @map("action_required")
+  sender         String?
+  senderName     String?   @map("sender_name")
+  recipients     String[]  @map("recipients")
+  gmailLabelIds  String[]  @default([]) @map("gmail_label_ids")
+  receivedAt     DateTime  @default(now()) @map("received_at")
+  isRead         Boolean   @default(false) @map("is_read")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiLogs         AILog[]
+
+  @@index([userId])
+  @@index([category])
+  @@index([priority])
+  @@map("emails")
+}
+
+model AILog {
+  id         String   @id @default(uuid())
+  emailId    String   @map("email_id")
+  userId     String   @map("user_id")
+  actionType String   @map("action_type")
+  prompt     String?  @db.Text
+  response   String?  @db.Text
+  model      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email      Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([emailId])
+  @@index([userId])
+  @@index([actionType])
+  @@map("ai_logs")
+}

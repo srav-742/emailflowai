@@ -38,7 +38,7 @@ model Email {
   id             String    @id @default(uuid())
   userId         String    @map("user_id")
   accountId      String?   @map("account_id")
-  messageId      String?   @unique @map("message_id")
+  messageId      String?   @map("message_id")
   threadId       String?   @map("thread_id")
   subject        String?
   body           String?   @db.Text
@@ -66,6 +66,7 @@ model Email {
   aiLogs         AILog[]
 
   @@index([userId])
+  @@unique([userId, messageId])
   @@index([accountId])
   @@index([category])
   @@index([priority])

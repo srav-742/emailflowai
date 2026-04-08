@@ -4,9 +4,78 @@ const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
 const PRIORITY_LEVELS = new Set(['low', 'medium', 'high']);
+const ACTIONABLE_PATTERN =
+  /\b(please|can you|could you|kindly|need to|follow up|schedule|send|share|review|submit|prepare|update|reply|deadline|asap|urgent)\b/i;
+
+let groqTaskCooldownUntil = 0;
+let groqTaskCooldownReason = null;
 
 function cleanJsonBlock(value = '') {
   return value.replace(/```json/gi, '').replace(/```/g, '').trim();
+}
+
+function truncateForPrompt(value = '', limit = 1800) {
+  const normalized = normalizeWhitespace(value);
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, limit).trim()}...`;
+}
+
+function parseRetryAfterMs(message = '') {
+  const retryMatch = String(message).match(/try again in\s+((?:\d+(?:\.\d+)?h)?(?:\d+(?:\.\d+)?m)?(?:\d+(?:\.\d+)?s)?)/i);
+  if (!retryMatch?.[1]) {
+    return null;
+  }
+
+  const durationText = retryMatch[1];
+  const hourMatch = durationText.match(/(\d+(?:\.\d+)?)h/i);
+  const minuteMatch = durationText.match(/(\d+(?:\.\d+)?)m/i);
+  const secondMatch = durationText.match(/(\d+(?:\.\d+)?)s/i);
+
+  const hours = hourMatch ? Number.parseFloat(hourMatch[1]) : 0;
+  const minutes = minuteMatch ? Number.parseFloat(minuteMatch[1]) : 0;
+  const seconds = secondMatch ? Number.parseFloat(secondMatch[1]) : 0;
+  const totalMs = ((hours * 60 * 60) + (minutes * 60) + seconds) * 1000;
+
+  return Number.isFinite(totalMs) && totalMs > 0 ? totalMs : null;
+}
+
+function extractRateLimitMessage(error) {
+  return (
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    ''
+  );
+}
+
+function isGroqRateLimitError(error) {
+  const code = String(error?.response?.data?.error?.code || error?.code || '').toLowerCase();
+  const message = extractRateLimitMessage(error).toLowerCase();
+
+  return code === 'rate_limit_exceeded' || code === 'tokens' || message.includes('rate limit');
+}
+
+function enterGroqTaskCooldown(error) {
+  const message = extractRateLimitMessage(error);
+  const retryAfterMs = parseRetryAfterMs(message) || 15 * 60 * 1000;
+  groqTaskCooldownUntil = Date.now() + retryAfterMs;
+  groqTaskCooldownReason = message;
+
+  console.warn(
+    `Task extraction AI is cooling down until ${new Date(groqTaskCooldownUntil).toLocaleTimeString()}. Falling back to local extraction.`,
+  );
+}
+
+function isLikelyActionableEmail(email = {}) {
+  if (email.actionRequired || email.priority === 'high') {
+    return true;
+  }
+
+  const content = `${email.subject || ''} ${email.body || ''} ${email.snippet || ''}`;
+  return ACTIONABLE_PATTERN.test(content);
 }
 
 function sanitizeTask(task, index) {
@@ -156,6 +225,19 @@ async function extractTasksWithAI(email = {}) {
     return extractTasksFallback(email);
   }
 
+  if (!isLikelyActionableEmail(email)) {
+    return extractTasksFallback(email);
+  }
+
+  if (groqTaskCooldownUntil > Date.now()) {
+    return extractTasksFallback(email);
+  }
+
+  if (groqTaskCooldownUntil && groqTaskCooldownUntil <= Date.now()) {
+    groqTaskCooldownUntil = 0;
+    groqTaskCooldownReason = null;
+  }
+
   const prompt = [
     'Extract action items from this email.',
     'Return only a JSON array.',
@@ -166,7 +248,7 @@ async function extractTasksWithAI(email = {}) {
     '',
     `Subject: ${email.subject || 'No subject'}`,
     `From: ${email.sender || 'Unknown sender'}`,
-    `Body: ${email.body || email.snippet || 'No body'}`,
+    `Body: ${truncateForPrompt(email.body || email.snippet || 'No body')}`,
   ].join('\n');
 
   try {
@@ -198,6 +280,11 @@ async function extractTasksWithAI(email = {}) {
     const tasks = parseTasksResponse(content);
     return tasks.length ? tasks : extractTasksFallback(email);
   } catch (error) {
+    if (isGroqRateLimitError(error)) {
+      enterGroqTaskCooldown(error);
+      return extractTasksFallback(email);
+    }
+
     console.error('Task extraction error:', error.response?.data || error.message || error);
     return extractTasksFallback(email);
   }

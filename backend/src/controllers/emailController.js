@@ -11,7 +11,9 @@ const { getGmailClient } = require('../utils/gmailClient');
 const { getUserSocketRoom } = require('../utils/socketRooms');
 
 function buildEmailContent(email) {
-  return `Subject: ${email.subject || 'No Subject'}\nFrom: ${email.sender || 'Unknown'}\n\n${email.body || email.snippet || ''}`;
+  const content = `${email.body || email.snippet || ''}`.replace(/\s+/g, ' ').trim();
+  const trimmedContent = content.length > 4000 ? `${content.slice(0, 4000).trim()}...` : content;
+  return `Subject: ${email.subject || 'No Subject'}\nFrom: ${email.sender || 'Unknown'}\n\n${trimmedContent}`;
 }
 
 function buildReplyRawMessage({ to, subject, body }) {

@@ -4,6 +4,8 @@ const { analyzeEmailIntelligence } = require('../utils/classifier');
 const { extractTasksWithAI } = require('./taskExtractor');
 const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
 
+const activeSyncs = new Map();
+
 function decodeMessage(data = '') {
   const buffer = Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
   return buffer.toString('utf-8');
@@ -98,6 +100,19 @@ function buildSyncWarning() {
   return 'Gmail sync is temporarily unavailable. Showing the latest emails already saved in your workspace.';
 }
 
+function isEmailMessageConflict(error) {
+  if (!error) {
+    return false;
+  }
+
+  const prismaCode = String(error.code || '').toUpperCase();
+  if (prismaCode === 'P2002') {
+    return true;
+  }
+
+  return String(error.message || '').toLowerCase().includes('unique constraint failed');
+}
+
 async function getCachedInboxSnapshot(userId, maxResults) {
   const emails = await prisma.email.findMany({
     where: { userId },
@@ -182,19 +197,46 @@ async function persistEmail(userId, payload, existingEmail) {
 
   const tasks = payload.isSent ? [] : await extractTasksWithAI(payload);
 
-  const email = await prisma.email.create({
-    data: {
-      userId,
-      messageId: payload.messageId,
-      tasks,
-      ...baseData,
-    },
-  });
+  try {
+    const email = await prisma.email.create({
+      data: {
+        userId,
+        messageId: payload.messageId,
+        tasks,
+        ...baseData,
+      },
+    });
 
-  return { email, isNew: true };
+    return { email, isNew: true };
+  } catch (error) {
+    if (!payload.messageId || !isEmailMessageConflict(error)) {
+      throw error;
+    }
+
+    const matchingEmail = await prisma.email.findFirst({
+      where: {
+        userId,
+        messageId: payload.messageId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!matchingEmail) {
+      throw error;
+    }
+
+    const email = await prisma.email.update({
+      where: { id: matchingEmail.id },
+      data: baseData,
+    });
+
+    return { email, isNew: false };
+  }
 }
 
-async function syncInbox(userId, maxResults = 35, options = {}) {
+async function syncInboxInternal(userId, maxResults = 35, options = {}) {
   const { returnMeta = false } = options;
   const user = await getAuthenticatedUser(userId);
   const gmail = getGmailClient(user.accessToken, user.refreshToken);
@@ -238,6 +280,10 @@ async function syncInbox(userId, maxResults = 35, options = {}) {
         const payload = buildEmailPayload(message);
         const existingEmail = existingByMessageId.get(payload.messageId) || null;
         const result = await persistEmail(userId, payload, existingEmail);
+        existingByMessageId.set(payload.messageId, {
+          id: result.email.id,
+          messageId: payload.messageId,
+        });
 
         syncedEmails.push(result.email);
         if (result.isNew) {
@@ -300,6 +346,21 @@ async function syncInbox(userId, maxResults = 35, options = {}) {
 
     return returnMeta ? fallback : fallback.emails;
   }
+}
+
+function syncInbox(userId, maxResults = 35, options = {}) {
+  if (activeSyncs.has(userId)) {
+    return activeSyncs.get(userId);
+  }
+
+  const syncPromise = syncInboxInternal(userId, maxResults, options).finally(() => {
+    if (activeSyncs.get(userId) === syncPromise) {
+      activeSyncs.delete(userId);
+    }
+  });
+
+  activeSyncs.set(userId, syncPromise);
+  return syncPromise;
 }
 
 module.exports = {

@@ -1,0 +1,308 @@
+const prisma = require('../config/database');
+const { getGmailClient } = require('../utils/gmailClient');
+const { analyzeEmailIntelligence } = require('../utils/classifier');
+const { extractTasksWithAI } = require('./taskExtractor');
+const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
+
+function decodeMessage(data = '') {
+  const buffer = Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  return buffer.toString('utf-8');
+}
+
+function stripHtml(value = '') {
+  return value.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractHeader(headers = [], name) {
+  return headers.find((header) => header.name?.toLowerCase() === name.toLowerCase())?.value || '';
+}
+
+function extractBody(payload) {
+  if (!payload) {
+    return '';
+  }
+
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return decodeMessage(payload.body.data);
+  }
+
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    return stripHtml(decodeMessage(payload.body.data));
+  }
+
+  for (const part of payload.parts || []) {
+    const partBody = extractBody(part);
+    if (partBody) {
+      return partBody;
+    }
+  }
+
+  if (payload.body?.data) {
+    return decodeMessage(payload.body.data);
+  }
+
+  return '';
+}
+
+function parseName(sender = '') {
+  const match = sender.match(/^(.*?)(<.+>)$/);
+  return match ? match[1].replace(/["']/g, '').trim() : sender;
+}
+
+function ensureGmailConnection(user) {
+  if (!user?.accessToken && !user?.refreshToken) {
+    const error = new Error('Gmail access token not found. Please reconnect Gmail.');
+    error.statusCode = 401;
+    throw error;
+  }
+}
+
+async function getAuthenticatedUser(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  ensureGmailConnection(user);
+  return user;
+}
+
+function sortEmailsByNewest(emails = []) {
+  return [...emails].sort((left, right) => new Date(right.receivedAt || 0).getTime() - new Date(left.receivedAt || 0).getTime());
+}
+
+function isRecoverableGmailError(error) {
+  if (!error) {
+    return false;
+  }
+
+  if (error.statusCode && error.statusCode < 500 && error.statusCode !== 429) {
+    return false;
+  }
+
+  const errorCode = String(error.code || error.cause?.code || '').toUpperCase();
+  if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNABORTED'].includes(errorCode)) {
+    return true;
+  }
+
+  const message = String(error.message || '').toLowerCase();
+  return (
+    message.includes('gmail') ||
+    message.includes('network') ||
+    message.includes('socket') ||
+    message.includes('timeout') ||
+    message.includes('econnrefused')
+  );
+}
+
+function buildSyncWarning() {
+  return 'Gmail sync is temporarily unavailable. Showing the latest emails already saved in your workspace.';
+}
+
+async function getCachedInboxSnapshot(userId, maxResults) {
+  const emails = await prisma.email.findMany({
+    where: { userId },
+    orderBy: { receivedAt: 'desc' },
+    take: maxResults,
+  });
+
+  return sortEmailsByNewest(emails);
+}
+
+function buildEmailPayload(message) {
+  const payload = message.data.payload;
+  const headers = payload?.headers || [];
+  const subject = extractHeader(headers, 'subject');
+  const from = extractHeader(headers, 'from');
+  const to = extractHeader(headers, 'to');
+  const labelIds = message.data.labelIds || [];
+  const body = extractBody(payload).slice(0, 10000);
+  const snippet = message.data.snippet || '';
+  const intelligence = analyzeEmailIntelligence({
+    subject,
+    body,
+    snippet,
+    sender: from,
+    labelIds,
+  });
+
+  return {
+    messageId: message.data.id || '',
+    threadId: message.data.threadId || undefined,
+    subject,
+    body,
+    snippet,
+    summary: intelligence.summary,
+    priority: intelligence.priority,
+    category: intelligence.category,
+    labels: intelligence.labels,
+    actionRequired: intelligence.actionRequired,
+    sender: from,
+    senderName: parseName(from),
+    recipients: to
+      ? to
+          .split(',')
+          .map((recipient) => recipient.trim())
+          .filter(Boolean)
+      : [],
+    gmailLabelIds: labelIds,
+    isSent: labelIds.includes('SENT'),
+    receivedAt: message.data.internalDate ? new Date(Number.parseInt(message.data.internalDate, 10)) : new Date(),
+    isRead: !labelIds.includes('UNREAD'),
+  };
+}
+
+async function persistEmail(userId, payload, existingEmail) {
+  const baseData = {
+    subject: payload.subject,
+    body: payload.body,
+    snippet: payload.snippet,
+    summary: payload.summary,
+    priority: payload.priority,
+    category: payload.category,
+    labels: payload.labels,
+    actionRequired: payload.actionRequired,
+    sender: payload.sender,
+    senderName: payload.senderName,
+    recipients: payload.recipients,
+    gmailLabelIds: payload.gmailLabelIds,
+    isSent: payload.isSent,
+    isRead: payload.isRead,
+    threadId: payload.threadId,
+    receivedAt: payload.receivedAt,
+  };
+
+  if (existingEmail) {
+    const email = await prisma.email.update({
+      where: { id: existingEmail.id },
+      data: baseData,
+    });
+
+    return { email, isNew: false };
+  }
+
+  const tasks = payload.isSent ? [] : await extractTasksWithAI(payload);
+
+  const email = await prisma.email.create({
+    data: {
+      userId,
+      messageId: payload.messageId,
+      tasks,
+      ...baseData,
+    },
+  });
+
+  return { email, isNew: true };
+}
+
+async function syncInbox(userId, maxResults = 35, options = {}) {
+  const { returnMeta = false } = options;
+  const user = await getAuthenticatedUser(userId);
+  const gmail = getGmailClient(user.accessToken, user.refreshToken);
+
+  try {
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      maxResults,
+      includeSpamTrash: false,
+    });
+
+    const messageRefs = response.data.messages || [];
+    const knownEmails = messageRefs.length
+      ? await prisma.email.findMany({
+          where: {
+            userId,
+            messageId: {
+              in: messageRefs.map((messageRef) => messageRef.id).filter(Boolean),
+            },
+          },
+          select: {
+            id: true,
+            messageId: true,
+          },
+        })
+      : [];
+
+    const existingByMessageId = new Map(knownEmails.map((email) => [email.messageId, email]));
+    const syncedEmails = [];
+    const newEmails = [];
+    let skippedMessages = 0;
+
+    for (const messageRef of messageRefs) {
+      try {
+        const message = await gmail.users.messages.get({
+          userId: 'me',
+          id: messageRef.id,
+          format: 'full',
+        });
+
+        const payload = buildEmailPayload(message);
+        const existingEmail = existingByMessageId.get(payload.messageId) || null;
+        const result = await persistEmail(userId, payload, existingEmail);
+
+        syncedEmails.push(result.email);
+        if (result.isNew) {
+          newEmails.push(result.email);
+        }
+      } catch (error) {
+        skippedMessages += 1;
+        console.error(`Skipping Gmail message ${messageRef.id} during sync:`, error.message || error);
+      }
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        lastSyncAt: new Date(),
+        accessToken: user.accessToken,
+        refreshToken: user.refreshToken,
+      },
+    });
+
+    if (newEmails.length > 0) {
+      await Promise.allSettled([
+        trackEmailProcessing(userId, newEmails.length),
+        trackAIAction(userId, {
+          aiActions: newEmails.length,
+          timeSaved: Math.max(2, newEmails.length * 2),
+        }),
+      ]);
+    }
+
+    const sortedEmails = sortEmailsByNewest(syncedEmails);
+    const result = {
+      emails: sortedEmails,
+      newEmails: sortEmailsByNewest(newEmails),
+      degraded: false,
+      warning: skippedMessages
+        ? `Synced your inbox, but ${skippedMessages} Gmail message${skippedMessages > 1 ? 's could not' : ' could not'} be processed.`
+        : null,
+    };
+
+    if (messageRefs.length > 0 && sortedEmails.length === 0) {
+      const fallbackEmails = await getCachedInboxSnapshot(userId, maxResults);
+      result.emails = fallbackEmails;
+      result.degraded = true;
+      result.warning = buildSyncWarning();
+    }
+
+    return returnMeta ? result : result.emails;
+  } catch (error) {
+    if (!isRecoverableGmailError(error)) {
+      throw error;
+    }
+
+    const fallback = {
+      emails: await getCachedInboxSnapshot(userId, maxResults),
+      newEmails: [],
+      degraded: true,
+      warning: buildSyncWarning(),
+    };
+
+    return returnMeta ? fallback : fallback.emails;
+  }
+}
+
+module.exports = {
+  getAuthenticatedUser,
+  syncInbox,
+};

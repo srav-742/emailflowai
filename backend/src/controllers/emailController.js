@@ -1,163 +1,14 @@
 const prisma = require('../config/database');
-const { getGmailClient } = require('../utils/gmailClient');
 const { analyzeEmailIntelligence, generateSummary } = require('../utils/classifier');
 const { summarizeEmail: groqSummarize, classifyEmail: groqClassify, generateReply } = require('../utils/groq');
-
-function decodeMessage(data = '') {
-  const buffer = Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  return buffer.toString('utf-8');
-}
-
-function stripHtml(value = '') {
-  return value.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function extractHeader(headers = [], name) {
-  return headers.find((header) => header.name?.toLowerCase() === name.toLowerCase())?.value || '';
-}
-
-function extractBody(payload) {
-  if (!payload) {
-    return '';
-  }
-
-  if (payload.mimeType === 'text/plain' && payload.body?.data) {
-    return decodeMessage(payload.body.data);
-  }
-
-  if (payload.mimeType === 'text/html' && payload.body?.data) {
-    return stripHtml(decodeMessage(payload.body.data));
-  }
-
-  for (const part of payload.parts || []) {
-    const partBody = extractBody(part);
-    if (partBody) {
-      return partBody;
-    }
-  }
-
-  if (payload.body?.data) {
-    return decodeMessage(payload.body.data);
-  }
-
-  return '';
-}
-
-function parseName(sender = '') {
-  const match = sender.match(/^(.*?)(<.+>)$/);
-  return match ? match[1].replace(/["']/g, '').trim() : sender;
-}
-
-function ensureGmailConnection(user) {
-  if (!user?.accessToken && !user?.refreshToken) {
-    const error = new Error('Gmail access token not found. Please reconnect Gmail.');
-    error.statusCode = 401;
-    throw error;
-  }
-}
-
-async function getAuthenticatedUser(userId) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  ensureGmailConnection(user);
-  return user;
-}
-
-async function upsertMessage(userId, message) {
-  const payload = message.data.payload;
-  const headers = payload?.headers || [];
-  const subject = extractHeader(headers, 'subject');
-  const from = extractHeader(headers, 'from');
-  const to = extractHeader(headers, 'to');
-  const labelIds = message.data.labelIds || [];
-  const body = extractBody(payload).slice(0, 10000);
-  const snippet = message.data.snippet || '';
-  const intelligence = analyzeEmailIntelligence({
-    subject,
-    body,
-    snippet,
-    sender: from,
-    labelIds,
-  });
-
-  return prisma.email.upsert({
-    where: {
-      messageId: message.data.id || '',
-    },
-    update: {
-      subject,
-      body,
-      snippet,
-      summary: intelligence.summary,
-      priority: intelligence.priority,
-      category: intelligence.category,
-      labels: intelligence.labels,
-      actionRequired: intelligence.actionRequired,
-      sender: from,
-      senderName: parseName(from),
-      recipients: to ? [to] : [],
-      gmailLabelIds: labelIds,
-      isRead: !labelIds.includes('UNREAD'),
-      threadId: message.data.threadId || undefined,
-    },
-    create: {
-      userId,
-      messageId: message.data.id || '',
-      threadId: message.data.threadId || undefined,
-      subject,
-      body,
-      snippet,
-      summary: intelligence.summary,
-      priority: intelligence.priority,
-      category: intelligence.category,
-      labels: intelligence.labels,
-      actionRequired: intelligence.actionRequired,
-      sender: from,
-      senderName: parseName(from),
-      recipients: to ? [to] : [],
-      gmailLabelIds: labelIds,
-      receivedAt: message.data.internalDate ? new Date(Number.parseInt(message.data.internalDate, 10)) : new Date(),
-      isRead: !labelIds.includes('UNREAD'),
-    },
-  });
-}
-
-async function syncInbox(userId, maxResults = 35) {
-  const user = await getAuthenticatedUser(userId);
-  const gmail = getGmailClient(user.accessToken, user.refreshToken);
-  const response = await gmail.users.messages.list({
-    userId: 'me',
-    maxResults,
-    includeSpamTrash: false,
-  });
-
-  const messages = response.data.messages || [];
-  const synced = [];
-
-  for (const messageRef of messages) {
-    const message = await gmail.users.messages.get({
-      userId: 'me',
-      id: messageRef.id,
-      format: 'full',
-    });
-
-    const savedEmail = await upsertMessage(userId, message);
-    synced.push(savedEmail);
-  }
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      lastSyncAt: new Date(),
-      accessToken: user.accessToken,
-      refreshToken: user.refreshToken,
-    },
-  });
-
-  return synced;
-}
+const { extractTasksWithAI } = require('../services/taskExtractor');
+const { getAuthenticatedUser, syncInbox } = require('../services/inboxSyncService');
+const { trackAIAction } = require('../services/analyticsService');
+const { getOrCreateStyleProfile } = require('../services/styleService');
+const { emitEmailNotifications } = require('../services/notificationService');
+const { detectFollowUps } = require('../services/followUpService');
+const { getGmailClient } = require('../utils/gmailClient');
+const { getUserSocketRoom } = require('../utils/socketRooms');
 
 function buildEmailContent(email) {
   return `Subject: ${email.subject || 'No Subject'}\nFrom: ${email.sender || 'Unknown'}\n\n${email.body || email.snippet || ''}`;
@@ -181,10 +32,39 @@ function buildReplyRawMessage({ to, subject, body }) {
     .replace(/=+$/g, '');
 }
 
+function normalizeStoredPriority(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized === 'medium') {
+    return 'normal';
+  }
+
+  if (['high', 'normal', 'low'].includes(normalized)) {
+    return normalized;
+  }
+
+  return 'normal';
+}
+
+async function logAIUsage(userId, options = {}) {
+  try {
+    await trackAIAction(userId, options);
+  } catch (error) {
+    console.error('Analytics tracking error:', error.message || error);
+  }
+}
+
 const fetchEmails = async (req, res) => {
   try {
-    const emails = await syncInbox(req.user.id, 20);
-    res.json({ emails });
+    const result = await syncInbox(req.user.id, 20, { returnMeta: true });
+    res.json({
+      emails: result.emails,
+      newEmails: result.newEmails,
+      count: result.emails.length,
+      newCount: result.newEmails.length,
+      degraded: Boolean(result.degraded),
+      warning: result.warning || null,
+    });
   } catch (error) {
     console.error('Fetch emails error:', error);
     res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch emails' });
@@ -330,35 +210,46 @@ const summarizeEmail = async (req, res) => {
 
 const getStats = async (req, res) => {
   try {
-    const totalEmails = await prisma.email.count({
-      where: { userId: req.user.id },
-    });
+    const [totalEmails, byCategory, byPriority, unreadCount, actionRequired, followUpCount, taskPayload] = await Promise.all([
+      prisma.email.count({
+        where: { userId: req.user.id },
+      }),
+      prisma.email.groupBy({
+        by: ['category'],
+        where: { userId: req.user.id },
+        _count: true,
+      }),
+      prisma.email.groupBy({
+        by: ['priority'],
+        where: { userId: req.user.id },
+        _count: true,
+      }),
+      prisma.email.count({
+        where: { userId: req.user.id, isRead: false },
+      }),
+      prisma.email.count({
+        where: { userId: req.user.id, actionRequired: true },
+      }),
+      prisma.email.count({
+        where: { userId: req.user.id, followUp: true },
+      }),
+      prisma.email.findMany({
+        where: { userId: req.user.id },
+        select: { tasks: true },
+      }),
+    ]);
 
-    const byCategory = await prisma.email.groupBy({
-      by: ['category'],
-      where: { userId: req.user.id },
-      _count: true,
-    });
-
-    const byPriority = await prisma.email.groupBy({
-      by: ['priority'],
-      where: { userId: req.user.id },
-      _count: true,
-    });
-
-    const unreadCount = await prisma.email.count({
-      where: { userId: req.user.id, isRead: false },
-    });
-
-    const actionRequired = await prisma.email.count({
-      where: { userId: req.user.id, actionRequired: true },
-    });
+    const allTasks = taskPayload.flatMap((entry) => (Array.isArray(entry.tasks) ? entry.tasks : []));
+    const pendingTasks = allTasks.filter((task) => !task?.completed);
 
     res.json({
       stats: {
         totalEmails,
         unreadCount,
         actionRequired,
+        followUpCount,
+        taskCount: allTasks.length,
+        pendingTaskCount: pendingTasks.length,
         byCategory: byCategory.map((item) => ({ category: item.category, count: item._count?._all ?? item._count ?? 0 })),
         byPriority: byPriority.map((item) => ({ priority: item.priority, count: item._count?._all ?? item._count ?? 0 })),
       },
@@ -371,11 +262,82 @@ const getStats = async (req, res) => {
 
 const syncEmails = async (req, res) => {
   try {
-    const emails = await syncInbox(req.user.id, 40);
-    res.json({ message: 'Emails synced successfully', count: emails.length, emails });
+    const result = await syncInbox(req.user.id, 40, { returnMeta: true });
+    const io = req.app.get('io');
+
+    if (result.newEmails.length > 0) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: {
+          id: true,
+          importantContacts: true,
+        },
+      });
+
+      if (user) {
+        emitEmailNotifications(io, user, result.newEmails);
+      } else {
+        io.to(getUserSocketRoom(req.user.id)).emit('new-emails', result.newEmails);
+      }
+    }
+
+    await detectFollowUps(io);
+
+    res.json({
+      message: result.degraded ? 'Showing your saved inbox while Gmail sync is temporarily unavailable' : 'Emails synced successfully',
+      count: result.emails.length,
+      newCount: result.newEmails.length,
+      emails: result.emails,
+      newEmails: result.newEmails,
+      degraded: Boolean(result.degraded),
+      warning: result.warning || null,
+    });
   } catch (error) {
     console.error('Sync emails error:', error);
     res.status(error.statusCode || 500).json({ error: error.message || 'Failed to sync emails' });
+  }
+};
+
+const extractEmailTasks = async (req, res) => {
+  try {
+    const email = await prisma.email.findFirst({
+      where: {
+        id: req.params.id,
+        userId: req.user.id,
+      },
+    });
+
+    if (!email) {
+      return res.status(404).json({ error: 'Email not found' });
+    }
+
+    const tasks = await extractTasksWithAI(email);
+    const updatedEmail = await prisma.email.update({
+      where: { id: email.id },
+      data: { tasks },
+    });
+
+    await prisma.aILog.create({
+      data: {
+        emailId: email.id,
+        userId: req.user.id,
+        actionType: 'extract_tasks',
+        prompt: `Extract tasks from: ${email.subject || 'Untitled email'}`,
+        response: JSON.stringify(tasks),
+        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+      },
+    });
+
+    await logAIUsage(req.user.id, { aiActions: 1, timeSaved: 2 });
+
+    res.json({
+      message: 'Tasks extracted successfully',
+      tasks,
+      email: updatedEmail,
+    });
+  } catch (error) {
+    console.error('Extract tasks error:', error);
+    res.status(500).json({ error: 'Failed to extract tasks from email' });
   }
 };
 
@@ -409,6 +371,8 @@ const aiSummarize = async (req, res) => {
       },
     });
 
+    await logAIUsage(req.user.id, { aiActions: 1, timeSaved: 2 });
+
     res.json({ message: 'Email summarized using AI', email: updatedEmail });
   } catch (error) {
     console.error('AI summarize error:', error);
@@ -434,7 +398,7 @@ const aiClassify = async (req, res) => {
     const updatedEmail = await prisma.email.update({
       where: { id: email.id },
       data: {
-        priority: classification.priority || 'normal',
+        priority: normalizeStoredPriority(classification.priority),
         category: classification.category || 'general',
         labels: Array.isArray(classification.labels) ? classification.labels : email.labels,
         actionRequired: classification.actionRequired ?? email.actionRequired,
@@ -451,6 +415,8 @@ const aiClassify = async (req, res) => {
         model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
       },
     });
+
+    await logAIUsage(req.user.id, { aiActions: 1, timeSaved: 2 });
 
     res.json({ message: 'Email classified using AI', email: updatedEmail, classification });
   } catch (error) {
@@ -474,7 +440,8 @@ const aiGenerateReply = async (req, res) => {
       return res.status(404).json({ error: 'Email not found' });
     }
 
-    const reply = await generateReply(buildEmailContent(email), tone);
+    const styleProfile = await getOrCreateStyleProfile(req.user.id);
+    const reply = await generateReply(buildEmailContent(email), tone, styleProfile);
 
     await prisma.aILog.create({
       data: {
@@ -487,7 +454,9 @@ const aiGenerateReply = async (req, res) => {
       },
     });
 
-    res.json({ message: 'Reply generated using AI', reply, tone });
+    await logAIUsage(req.user.id, { aiActions: 1, timeSaved: 3 });
+
+    res.json({ message: 'Reply generated using AI', reply, tone, style: styleProfile });
   } catch (error) {
     console.error('AI reply error:', error);
     res.status(500).json({ error: 'Failed to generate reply with AI' });
@@ -563,19 +532,21 @@ const aiProcessAll = async (req, res) => {
 
     for (const email of emails) {
       try {
-        const [classification, summary] = await Promise.all([
+        const [classification, summary, tasks] = await Promise.all([
           groqClassify(buildEmailContent(email)),
           groqSummarize(buildEmailContent(email), email.subject || ''),
+          extractTasksWithAI(email),
         ]);
 
         await prisma.email.update({
           where: { id: email.id },
           data: {
-            priority: classification.priority || 'normal',
+            priority: normalizeStoredPriority(classification.priority),
             category: classification.category || email.category || 'general',
             labels: Array.isArray(classification.labels) ? classification.labels : email.labels,
             actionRequired: classification.actionRequired ?? email.actionRequired,
             summary,
+            tasks,
           },
         });
 
@@ -585,7 +556,7 @@ const aiProcessAll = async (req, res) => {
             userId: req.user.id,
             actionType: 'classify_and_summarize',
             prompt: `Process: ${email.subject}`,
-            response: JSON.stringify({ classification, summary }),
+            response: JSON.stringify({ classification, summary, tasks }),
             model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
           },
         });
@@ -593,8 +564,20 @@ const aiProcessAll = async (req, res) => {
         results.push({ id: email.id, subject: email.subject, status: 'success' });
         processedCount++;
       } catch (error) {
-        results.push({ id: email.id, subject: email.subject, status: 'failed' });
+        results.push({
+          id: email.id,
+          subject: email.subject,
+          status: 'failed',
+          error: error.message || 'Unknown AI processing error',
+        });
       }
+    }
+
+    if (processedCount > 0) {
+      await logAIUsage(req.user.id, {
+        aiActions: processedCount * 3,
+        timeSaved: processedCount * 3,
+      });
     }
 
     res.json({
@@ -617,6 +600,7 @@ module.exports = {
   summarizeEmail,
   getStats,
   syncEmails,
+  extractEmailTasks,
   aiSummarize,
   aiClassify,
   aiGenerateReply,

@@ -6,7 +6,11 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/authRoutes');
 const emailRoutes = require('./routes/emailRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 const prisma = require('./config/database');
+const { verifyToken } = require('./utils/jwt');
+const { getUserSocketRoom } = require('./utils/socketRooms');
+const { startEmailPolling } = require('./services/emailSyncService');
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -27,6 +31,40 @@ const io = new Server(server, {
     origin: allowedOrigins,
     methods: ['GET', 'POST'],
   },
+});
+
+// Authenticate the socket once so each connection can safely join its own user room.
+io.use(async (socket, next) => {
+  try {
+    const rawToken = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
+    const token = String(rawToken || '').replace(/^Bearer\s+/i, '').trim();
+
+    if (!token) {
+      return next(new Error('Authentication token required'));
+    }
+
+    const decoded = verifyToken(token);
+    if (!decoded?.id) {
+      return next(new Error('Invalid or expired token'));
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    if (!user) {
+      return next(new Error('User not found'));
+    }
+
+    socket.data.user = user;
+    return next();
+  } catch (error) {
+    return next(new Error('Socket authentication failed'));
+  }
 });
 
 app.use(cors({
@@ -50,6 +88,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/auth', authRoutes);
 app.use('/api/emails', emailRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/api/health', async (req, res) => {
   let database = 'disconnected';
@@ -71,19 +110,33 @@ app.get('/api/health', async (req, res) => {
 
 // Socket.IO connection
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  const user = socket.data.user;
+  socket.join(getUserSocketRoom(user.id));
+  console.log(`Client connected: ${socket.id} (user: ${user.id})`);
+
+  socket.on('join', (requestedUserId) => {
+    if (String(requestedUserId) !== user.id) {
+      socket.emit('socket:error', { message: 'Room join denied' });
+      return;
+    }
+
+    socket.join(getUserSocketRoom(user.id));
+    socket.emit('joined', { room: getUserSocketRoom(user.id) });
+  });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
 
   socket.on('sync_emails', () => {
-    io.emit('emails_synced', { message: 'Emails have been synced' });
+    io.to(getUserSocketRoom(user.id)).emit('emails_synced', { message: 'Emails have been synced' });
   });
 });
 
 // Make io accessible to routes
 app.set('io', io);
+
+startEmailPolling(io);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

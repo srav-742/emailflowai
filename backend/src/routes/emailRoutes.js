@@ -7,6 +7,7 @@ const {
   summarizeEmail,
   getStats,
   syncEmails,
+  extractEmailTasks,
   aiSummarize,
   aiClassify,
   aiGenerateReply,
@@ -27,6 +28,7 @@ router.get('/stats', getStats);
 router.post('/classify', classifyEmails);
 router.get('/:id', getEmailById);
 router.post('/:id/summarize', summarizeEmail);
+router.post('/:id/extract-tasks', extractEmailTasks);
 router.post('/:id/reply/send', sendReply);
 
 // AI-Powered Routes (Groq)

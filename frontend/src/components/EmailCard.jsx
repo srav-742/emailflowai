@@ -6,6 +6,7 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
   const [expanded, setExpanded] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [classifying, setClassifying] = useState(false);
+  const [extractingTasks, setExtractingTasks] = useState(false);
   const [showReply, setShowReply] = useState(false);
 
   const getPriorityColor = (priority) => {
@@ -51,6 +52,18 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
     }
   };
 
+  const handleExtractTasks = async () => {
+    try {
+      setExtractingTasks(true);
+      await emailAPI.extractTasks(email.id);
+      if (onUpdate) onUpdate();
+    } catch (error) {
+      console.error('Task extraction error:', error);
+    } finally {
+      setExtractingTasks(false);
+    }
+  };
+
   return (
     <article className={`mail-card ${compact ? 'mail-card-compact' : ''}`} data-legacy-icon={getCategoryIcon(email.category)}>
       <div className="mail-card-top">
@@ -82,11 +95,39 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
           </span>
         ))}
         {email.actionRequired && <span className="mail-label mail-label-accent">action-required</span>}
+        {email.followUp && <span className="mail-label mail-label-accent">follow-up</span>}
+        {email.isSent && <span className="mail-label">sent</span>}
       </div>
 
       {(expanded || !compact) && (
         <div className="mail-body-preview">
           <p>{email.body?.slice(0, compact ? 220 : 420) || email.snippet || 'No message body available.'}</p>
+        </div>
+      )}
+
+      {Array.isArray(email.tasks) && email.tasks.length > 0 && (
+        <div className="mail-task-box">
+          <div className="task-row-top">
+            <strong>Email tasks</strong>
+            <span className="mail-label">{email.tasks.length}</span>
+          </div>
+
+          <div className="mail-task-list">
+            {email.tasks.map((task, index) => (
+              <div key={task.id || `${email.id}-task-${index}`} className="mail-task-item">
+                <div className="task-row-top">
+                  <strong>{task.task}</strong>
+                  <span className={`mail-pill ${task.priority === 'high' ? 'high' : task.priority === 'low' ? 'low' : 'normal'}`}>
+                    {task.priority || 'medium'}
+                  </span>
+                </div>
+                <div className="task-meta-row">
+                  <span className="mail-label">{task.deadline || 'No deadline'}</span>
+                  {task.completed ? <span className="mail-label mail-label-accent">completed</span> : null}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -96,6 +137,9 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         </button>
         <button className="button button-ghost" onClick={handleAIClassify} disabled={classifying}>
           {classifying ? 'Classifying...' : 'Reclassify'}
+        </button>
+        <button className="button button-ghost" onClick={handleExtractTasks} disabled={extractingTasks}>
+          {extractingTasks ? 'Extracting tasks...' : 'Extract tasks'}
         </button>
         <button className="button button-secondary" onClick={() => setShowReply((value) => !value)}>
           {showReply ? 'Close draft' : 'Open reply'}

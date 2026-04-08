@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authAPI } from '../services/api';
 import { auth, googleProvider, GoogleAuthProvider, signInWithPopup, signOut } from '../config/firebase';
 
@@ -10,15 +10,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('token'));
 
-  useEffect(() => {
-    if (token) {
-      refreshProfile();
-    } else {
-      setLoading(false);
-    }
-  }, [token]);
-
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     try {
       const response = await authAPI.getProfile();
       setUser(response.data.user);
@@ -30,9 +22,17 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const authenticateWithGoogle = async () => {
+  useEffect(() => {
+    if (token) {
+      refreshProfile();
+    } else {
+      setLoading(false);
+    }
+  }, [refreshProfile, token]);
+
+  const authenticateWithGoogle = useCallback(async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const firebaseUser = result.user;
@@ -56,12 +56,12 @@ export const AuthProvider = ({ children }) => {
       }
       throw error;
     }
-  };
+  }, []);
 
-  const loginWithGoogle = async () => authenticateWithGoogle();
-  const grantInboxAccess = async () => authenticateWithGoogle();
+  const loginWithGoogle = useCallback(async () => authenticateWithGoogle(), [authenticateWithGoogle]);
+  const grantInboxAccess = useCallback(async () => authenticateWithGoogle(), [authenticateWithGoogle]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await authAPI.logout();
       await signOut(auth);
@@ -72,7 +72,7 @@ export const AuthProvider = ({ children }) => {
       setToken(null);
       setUser(null);
     }
-  };
+  }, []);
 
   return <AuthContext.Provider value={{ user, token, loading, loginWithGoogle, grantInboxAccess, logout, refreshProfile }}>{children}</AuthContext.Provider>;
 };

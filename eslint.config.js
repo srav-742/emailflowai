@@ -2,33 +2,14 @@ const js = require('@eslint/js');
 const globals = require('globals');
 const reactHooks = require('eslint-plugin-react-hooks');
 const reactRefresh = require('eslint-plugin-react-refresh').default;
-const tseslint = require('typescript-eslint');
 
 module.exports = [
   {
-    ignores: ['node_modules/**', 'Frontend/dist/**', 'Backend/dist/**', 'public/**'],
+    ignores: ['node_modules/**', 'frontend/dist/**', 'backend/dist/**', 'public/**'],
   },
   {
     ...js.configs.recommended,
-    files: ['Frontend/src/**/*.{ts,tsx}'],
-    languageOptions: {
-      ecmaVersion: 2024,
-      sourceType: 'module',
-      parserOptions: {
-        project: './Frontend/tsconfig.json',
-        tsconfigRootDir: __dirname,
-      },
-      globals: {
-        ...globals.browser,
-      },
-    },
-  },
-  ...tseslint.configs.recommended.map((config) => ({
-    ...config,
-    files: ['Frontend/src/**/*.{ts,tsx}', 'Backend/src/**/*.ts'],
-  })),
-  {
-    files: ['Frontend/src/**/*.{ts,tsx}'],
+    files: ['frontend/src/**/*.{js,jsx}'],
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
@@ -40,25 +21,20 @@ module.exports = [
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
-      parserOptions: {
-        project: './Frontend/tsconfig.json',
-        tsconfigRootDir: __dirname,
-      },
       globals: {
         ...globals.browser,
+      },
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
       },
     },
   },
   {
     ...js.configs.recommended,
-    files: ['Backend/src/**/*.ts'],
+    files: ['backend/src/**/*.js'],
     languageOptions: {
       ecmaVersion: 2024,
-      sourceType: 'module',
-      parserOptions: {
-        project: './Backend/tsconfig.json',
-        tsconfigRootDir: __dirname,
-      },
+      sourceType: 'commonjs',
       globals: {
         ...globals.node,
       },

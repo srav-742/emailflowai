@@ -2,8 +2,8 @@ const StatsOverview = ({ stats }) => {
   if (!stats) return null;
 
   const highPriority = stats.byPriority?.find((item) => item.priority === 'high')?.count || 0;
-  const normalPriority = stats.byPriority?.find((item) => item.priority === 'normal')?.count || 0;
   const clearedRate = stats.totalEmails ? Math.max(0, Math.round(((stats.totalEmails - stats.unreadCount) / stats.totalEmails) * 100)) : 0;
+  const followUpCount = stats.followUpCount || 0;
 
   return (
     <div className="metrics-grid">
@@ -32,11 +32,19 @@ const StatsOverview = ({ stats }) => {
       </div>
 
       <div className="metric-card">
-        <span className="eyebrow">Flow</span>
-        <h3>Action required</h3>
-        <strong>{stats.actionRequired || normalPriority}</strong>
-        <p>Emails that likely need a review, decision, or reply.</p>
-        <div className="metric-footnote">A compact queue for decisions, approvals, and responses.</div>
+        <span className="eyebrow">Tasks</span>
+        <h3>Pending tasks</h3>
+        <strong>{stats.pendingTaskCount || 0}</strong>
+        <p>Action items extracted from email that are still open.</p>
+        <div className="metric-footnote">{stats.taskCount || 0} total tasks have been detected across your inbox.</div>
+      </div>
+
+      <div className="metric-card">
+        <span className="eyebrow">Follow-ups</span>
+        <h3>Needs reply</h3>
+        <strong>{followUpCount}</strong>
+        <p>Sent threads that have gone quiet long enough to deserve a nudge.</p>
+        <div className="metric-footnote">Follow-up automation helps prevent important threads from slipping.</div>
       </div>
     </div>
   );

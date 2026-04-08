@@ -1,50 +1,232 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { emailAPI } from '../services/api';
+import { aiAPI, emailAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import EmailCard from '../components/EmailCard';
 import StatsOverview from '../components/StatsOverview';
+import { connectSocket, disconnectSocket } from '../services/socket';
+
+const sortByNewest = (items) =>
+  [...items].sort((left, right) => {
+    const leftDate = new Date(left.receivedAt || left.createdAt || 0).getTime();
+    const rightDate = new Date(right.receivedAt || right.createdAt || 0).getTime();
+    return rightDate - leftDate;
+  });
+
+const mergeIncomingEmails = (currentEmails, incomingEmails) => {
+  const merged = new Map();
+
+  sortByNewest([...incomingEmails, ...currentEmails]).forEach((email) => {
+    merged.set(email.id, email);
+  });
+
+  return Array.from(merged.values());
+};
+
+const mapTaskPriorityTone = (priority) => {
+  if (priority === 'high') {
+    return 'high';
+  }
+
+  if (priority === 'low') {
+    return 'low';
+  }
+
+  return 'normal';
+};
+
+const formatDateTime = (value, fallback = 'Not available yet') =>
+  value ? new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : fallback;
+
+const getFollowUpContact = (email) => email.recipients?.[0] || email.senderName || email.sender || 'this contact';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [emails, setEmails] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [processingAI, setProcessingAI] = useState(false);
   const [stats, setStats] = useState(null);
+  const [brief, setBrief] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [liveSync, setLiveSync] = useState({
+    connected: false,
+    lastReceivedAt: null,
+    newCount: 0,
+  });
 
-  useEffect(() => {
-    fetchEmails();
-    fetchStats();
-  }, []);
-
-  const fetchEmails = async () => {
+  const fetchEmails = useCallback(async () => {
     try {
       const response = await emailAPI.getEmails({ limit: 50 });
-      setEmails(response.data.emails);
+      const nextEmails = sortByNewest(response.data.emails || []);
+      setEmails(nextEmails);
+      return nextEmails;
     } catch (error) {
       console.error('Failed to fetch emails:', error);
-    } finally {
-      setLoading(false);
+      return [];
     }
-  };
+  }, []);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await emailAPI.getStats();
       setStats(response.data.stats);
+      return response.data.stats;
     } catch (error) {
       console.error('Failed to fetch stats:', error);
+      return null;
     }
-  };
+  }, []);
+
+  const fetchMorningBrief = useCallback(async () => {
+    try {
+      const response = await aiAPI.getMorningBrief();
+      setBrief(response.data.brief);
+      return response.data.brief;
+    } catch (error) {
+      console.error('Failed to fetch morning brief:', error);
+      return null;
+    }
+  }, []);
+
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const response = await aiAPI.getAnalytics();
+      setAnalytics(response.data.stats);
+      return response.data.stats;
+    } catch (error) {
+      console.error('Failed to fetch analytics:', error);
+      return null;
+    }
+  }, []);
+
+  const refreshEmailInsights = useCallback(async () => {
+    await Promise.all([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics()]);
+  }, [fetchAnalytics, fetchEmails, fetchMorningBrief, fetchStats]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadDashboard = async () => {
+      setLoading(true);
+      await Promise.allSettled([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
+
+      if (active) {
+        setLoading(false);
+      }
+    };
+
+    void loadDashboard();
+
+    return () => {
+      active = false;
+    };
+  }, [fetchAnalytics, fetchEmails, fetchMorningBrief, fetchStats, refreshProfile]);
+
+  useEffect(() => {
+    if (!user?.id || !user?.hasGmailAccess) {
+      setLiveSync({
+        connected: false,
+        lastReceivedAt: null,
+        newCount: 0,
+      });
+      return undefined;
+    }
+
+    const socket = connectSocket(user.id);
+    if (!socket) {
+      return undefined;
+    }
+
+    const handleConnect = () => {
+      setLiveSync((current) => ({
+        ...current,
+        connected: true,
+      }));
+    };
+
+    const handleDisconnect = () => {
+      setLiveSync((current) => ({
+        ...current,
+        connected: false,
+      }));
+    };
+
+    const handleNewEmails = (incomingEmails = []) => {
+      if (!Array.isArray(incomingEmails) || incomingEmails.length === 0) {
+        return;
+      }
+
+      setEmails((currentEmails) => mergeIncomingEmails(currentEmails, incomingEmails));
+      setLiveSync({
+        connected: socket.connected,
+        lastReceivedAt: new Date().toISOString(),
+        newCount: incomingEmails.length,
+      });
+      setNotice({
+        tone: 'ok',
+        text: `${incomingEmails.length} new email${incomingEmails.length > 1 ? 's were' : ' was'} saved and analyzed automatically.`,
+      });
+
+      void Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
+    };
+
+    const handleImportantEmail = (email) => {
+      setNotice({
+        tone: 'warn',
+        text: `Urgent email detected: ${email.subject || 'Untitled email'} from ${email.senderName || email.sender || 'Unknown sender'}.`,
+      });
+      void Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics()]);
+    };
+
+    const handleFollowUpReady = (followUps = []) => {
+      const count = Array.isArray(followUps) ? followUps.length : 0;
+      if (count > 0) {
+        setNotice({
+          tone: 'warn',
+          text: `${count} follow-up reminder${count > 1 ? 's are' : ' is'} ready for review.`,
+        });
+      }
+      void Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics()]);
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('new-emails', handleNewEmails);
+    socket.on('important-email', handleImportantEmail);
+    socket.on('follow-up-ready', handleFollowUpReady);
+
+    if (socket.connected) {
+      handleConnect();
+    }
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('new-emails', handleNewEmails);
+      socket.off('important-email', handleImportantEmail);
+      socket.off('follow-up-ready', handleFollowUpReady);
+      disconnectSocket();
+    };
+  }, [fetchAnalytics, fetchMorningBrief, fetchStats, refreshProfile, user?.hasGmailAccess, user?.id]);
 
   const handleProcessAI = async () => {
     try {
       setProcessingAI(true);
-      await emailAPI.aiProcessAll();
-      await Promise.all([fetchEmails(), fetchStats()]);
+      const response = await emailAPI.aiProcessAll();
+      setNotice({
+        tone: 'ok',
+        text: response.data.message || 'AI finished processing your inbox.',
+      });
+      await Promise.all([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
     } catch (error) {
       console.error('AI processing error:', error);
+      setNotice({
+        tone: 'warn',
+        text: error.response?.data?.error || 'AI processing could not finish right now.',
+      });
     } finally {
       setProcessingAI(false);
     }
@@ -52,13 +234,25 @@ const Dashboard = () => {
 
   const handleSyncEmails = async () => {
     try {
-      setLoading(true);
-      await emailAPI.syncEmails();
-      await Promise.all([fetchEmails(), fetchStats()]);
+      setSyncing(true);
+      const response = await emailAPI.syncEmails();
+      setEmails(sortByNewest(response.data.emails || []));
+      setNotice({
+        tone: response.data.degraded ? 'warn' : 'ok',
+        text:
+          response.data.warning ||
+          response.data.message ||
+          `${response.data.newCount || 0} new email${response.data.newCount === 1 ? '' : 's'} synced successfully.`,
+      });
+      await Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
     } catch (error) {
       console.error('Sync error:', error);
+      setNotice({
+        tone: 'warn',
+        text: error.response?.data?.error || 'Unable to sync Gmail right now. Your saved inbox is still available.',
+      });
     } finally {
-      setLoading(false);
+      setSyncing(false);
     }
   };
 
@@ -67,10 +261,27 @@ const Dashboard = () => {
   const developerQueue = emails.filter((email) => email.category === 'developer');
   const meetingQueue = emails.filter((email) => email.category === 'meetings');
   const newsletters = emails.filter((email) => email.category === 'newsletter');
+  const pendingTasks = emails
+    .flatMap((email) =>
+      Array.isArray(email.tasks)
+        ? email.tasks.map((task, index) => ({
+            ...task,
+            emailId: email.id,
+            emailSubject: email.subject || 'Untitled email',
+            emailSender: email.senderName || email.sender || 'Unknown sender',
+            taskKey: `${email.id}-${task.id || index}`,
+          }))
+        : [],
+    )
+    .filter((task) => !task.completed);
   const topCategories = [...(stats?.byCategory || [])].sort((left, right) => right.count - left.count).slice(0, 4);
-  const lastSyncLabel = user?.lastSyncAt
-    ? new Date(user.lastSyncAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-    : 'No sync yet';
+  const lastSyncLabel = formatDateTime(user?.lastSyncAt, 'No sync yet');
+  const lastLiveUpdateLabel = formatDateTime(liveSync.lastReceivedAt, 'Waiting for the next incoming email');
+  const urgentEmails = brief?.importantEmails?.length ? brief.importantEmails : actionQueue.slice(0, 4);
+  const followUpEmails = brief?.followUps?.length ? brief.followUps : emails.filter((email) => email.followUp).slice(0, 6);
+  const visibleTasks = brief?.tasks?.length ? brief.tasks : pendingTasks.slice(0, 6);
+  const analyticsCategories = [...(analytics?.byCategory || topCategories)].sort((left, right) => right.count - left.count).slice(0, 4);
+  const recentAI = analytics?.recentAI || [];
   const categoryCards = [
     { title: 'Action queue', description: 'Urgent asks and response-required threads.', items: actionQueue.slice(0, 4) },
     { title: 'Finance', description: 'Invoices, approvals, receipts, and payment updates.', items: financeQueue.slice(0, 4) },
@@ -107,8 +318,8 @@ const Dashboard = () => {
             <span>Needs action</span>
           </div>
           <div className="hero-mini-stat">
-            <strong>{financeQueue.length}</strong>
-            <span>Finance threads</span>
+            <strong>{pendingTasks.length}</strong>
+            <span>Open tasks</span>
           </div>
           <div className="hero-mini-stat">
             <strong>{developerQueue.length}</strong>
@@ -121,14 +332,48 @@ const Dashboard = () => {
         </div>
 
         <div className="hero-actions">
-          <button className="button button-primary" onClick={handleSyncEmails} disabled={loading}>
-            {user?.hasGmailAccess ? 'Sync Gmail now' : 'Retry sync after Gmail connect'}
+          <button className="button button-primary" onClick={handleSyncEmails} disabled={syncing}>
+            {syncing ? 'Syncing Gmail...' : user?.hasGmailAccess ? 'Sync Gmail now' : 'Retry sync after Gmail connect'}
           </button>
           <button className="button button-secondary" onClick={handleProcessAI} disabled={processingAI || !emails.length}>
             {processingAI ? 'Processing with AI...' : 'AI process current inbox'}
           </button>
         </div>
       </section>
+
+      <section className="surface-card live-sync-card">
+        <div>
+          <span className="eyebrow">Realtime inbox</span>
+          <h3>{user?.hasGmailAccess ? 'Live email sync is wired into your dashboard.' : 'Connect Gmail to turn on realtime inbox updates.'}</h3>
+          <p>
+            {liveSync.newCount > 0
+              ? `${liveSync.newCount} new email${liveSync.newCount > 1 ? 's were' : ' was'} added automatically and task extraction ran during sync.`
+              : 'Socket.IO keeps this view fresh, and new tasks and urgent alerts appear as soon as incoming email is saved.'}
+          </p>
+        </div>
+
+        <div className="live-sync-strip">
+          <span className={`status-pill ${liveSync.connected ? 'status-ok' : 'status-warn'}`}>
+            {liveSync.connected ? 'Live sync active' : user?.hasGmailAccess ? 'Reconnecting' : 'Gmail not connected'}
+          </span>
+          <span className="status-pill">Last live update: {lastLiveUpdateLabel}</span>
+        </div>
+      </section>
+
+      {notice?.text ? (
+        <section className="surface-card banner-card">
+          <div>
+            <span className="eyebrow">Workspace update</span>
+            <h3>{notice.tone === 'warn' ? 'Attention needed' : 'Everything is flowing'}</h3>
+            <p>{notice.text}</p>
+          </div>
+          <div className="live-sync-strip">
+            <span className={`status-pill ${notice.tone === 'warn' ? 'status-warn' : 'status-ok'}`}>
+              {notice.tone === 'warn' ? 'Review now' : 'Up to date'}
+            </span>
+          </div>
+        </section>
+      ) : null}
 
       {!user?.hasGmailAccess && (
         <section className="surface-card banner-card">
@@ -152,25 +397,27 @@ const Dashboard = () => {
           <div className="section-heading">
             <div>
               <span className="eyebrow">Morning brief</span>
-              <h3>What deserves your attention first</h3>
+              <h3>{brief?.headline || 'What deserves your attention first'}</h3>
             </div>
           </div>
 
+          <p>{brief?.summary || 'Your dashboard will summarize urgent emails, follow-ups, and task load here as soon as enough inbox data is available.'}</p>
+
           <div className="brief-grid">
             <article className="brief-stat">
-              <strong>{actionQueue.length}</strong>
-              <span>Action-required threads</span>
-              <p>Emails that look urgent or likely need a reply.</p>
+              <strong>{brief?.counts?.important ?? actionQueue.length}</strong>
+              <span>Urgent emails</span>
+              <p>Threads that look high priority or likely need a quick response.</p>
             </article>
             <article className="brief-stat">
-              <strong>{newsletters.length}</strong>
-              <span>Read-later items</span>
-              <p>Low-noise updates you can batch after the priority work.</p>
+              <strong>{brief?.counts?.tasks ?? pendingTasks.length}</strong>
+              <span>Open tasks</span>
+              <p>Action items the system extracted from incoming emails.</p>
             </article>
             <article className="brief-stat">
-              <strong>{topCategories[0]?.category || 'general'}</strong>
-              <span>Top inbox lane</span>
-              <p>The busiest category in your current workspace.</p>
+              <strong>{brief?.counts?.followUps ?? followUpEmails.length}</strong>
+              <span>Follow-ups</span>
+              <p>Sent conversations that look ready for a polite nudge.</p>
             </article>
             <article className="brief-stat">
               <strong>{lastSyncLabel}</strong>
@@ -178,27 +425,135 @@ const Dashboard = () => {
               <p>Your latest successful workspace refresh timestamp.</p>
             </article>
           </div>
+
+          <div className="stack-list">
+            {urgentEmails.length ? (
+              urgentEmails.slice(0, 3).map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshEmailInsights} />)
+            ) : (
+              <div className="empty-card">No urgent emails are competing for your attention right now.</div>
+            )}
+          </div>
         </div>
 
         <div className="surface-card">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Category mix</span>
-              <h3>Where your inbox energy is going</h3>
+              <span className="eyebrow">Analytics</span>
+              <h3>How the assistant is helping across your inbox</h3>
             </div>
           </div>
+
+          <div className="brief-grid">
+            <article className="brief-stat">
+              <strong>{analytics?.emailsProcessed ?? 0}</strong>
+              <span>Emails processed</span>
+              <p>Messages that have flowed through sync and structured storage.</p>
+            </article>
+            <article className="brief-stat">
+              <strong>{analytics?.aiActions ?? 0}</strong>
+              <span>AI actions</span>
+              <p>Summaries, classifications, task extractions, and reply drafts generated.</p>
+            </article>
+            <article className="brief-stat">
+              <strong>{analytics?.timeSaved ?? 0} min</strong>
+              <span>Estimated time saved</span>
+              <p>A running estimate based on automated triage and drafting assistance.</p>
+            </article>
+            <article className="brief-stat">
+              <strong>{analytics?.followUpCount ?? stats?.followUpCount ?? 0}</strong>
+              <span>Active follow-ups</span>
+              <p>Reminders currently waiting in the follow-up queue.</p>
+            </article>
+          </div>
+
           <div className="category-meter-grid">
-            {topCategories.map((entry) => (
+            {analyticsCategories.map((entry) => (
               <div key={entry.category} className="category-meter">
                 <div className="category-meter-top">
                   <strong>{entry.category}</strong>
                   <span>{entry.count}</span>
                 </div>
                 <div className="category-meter-bar">
-                  <span style={{ width: `${Math.min(100, (entry.count / Math.max(stats.totalEmails || 1, 1)) * 100)}%` }}></span>
+                  <span style={{ width: `${Math.min(100, (entry.count / Math.max(analytics?.totalEmails || stats?.totalEmails || 1, 1)) * 100)}%` }}></span>
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="stack-list">
+            {recentAI.length ? (
+              recentAI.map((entry, index) => (
+                <article key={`${entry.actionType}-${entry.createdAt}-${index}`} className="task-row">
+                  <div className="task-row-top">
+                    <strong>{entry.actionType.replace(/_/g, ' ')}</strong>
+                    <span className="mail-label">{entry.model || 'assistant'}</span>
+                  </div>
+                  <p>{formatDateTime(entry.createdAt)}</p>
+                </article>
+              ))
+            ) : (
+              <div className="empty-card">Run AI summarize, classify, or process-all to start building analytics history.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="surface-card">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Follow-up queue</span>
+              <h3>Sent conversations that look ready for a reminder</h3>
+            </div>
+          </div>
+
+          <div className="task-list">
+            {followUpEmails.length ? (
+              followUpEmails.slice(0, 6).map((email) => (
+                <article key={email.id} className="task-row">
+                  <div className="task-row-top">
+                    <strong>Follow up with {getFollowUpContact(email)}</strong>
+                    <span className="mail-pill high">needs reply</span>
+                  </div>
+                  <div className="task-meta-row">
+                    <span className="mail-label">{email.subject || 'Untitled thread'}</span>
+                    <span className="mail-label">{formatDateTime(email.followUpAt || email.receivedAt)}</span>
+                  </div>
+                  <p>{email.summary || email.snippet || 'This thread has been quiet long enough to deserve a check-in.'}</p>
+                </article>
+              ))
+            ) : (
+              <div className="empty-card">No follow-up reminders are pending right now.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="surface-card">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Task board</span>
+              <h3>Action items pulled directly from incoming emails</h3>
+            </div>
+          </div>
+
+          <div className="task-list">
+            {visibleTasks.length ? (
+              visibleTasks.map((task) => (
+                <article key={task.taskKey} className="task-row">
+                  <div className="task-row-top">
+                    <strong>{task.task}</strong>
+                    <span className={`mail-pill ${mapTaskPriorityTone(task.priority)}`}>{task.priority || 'medium'}</span>
+                  </div>
+                  <div className="task-meta-row">
+                    <span className="mail-label">{task.deadline || 'No deadline detected'}</span>
+                    <span className="mail-label">{task.emailSender || task.contact || 'Unknown sender'}</span>
+                  </div>
+                  <p>{task.emailSubject}</p>
+                </article>
+              ))
+            ) : (
+              <div className="empty-card">
+                No tasks have been extracted yet. Sync Gmail or run AI processing to build your task queue.
+              </div>
+            )}
           </div>
         </div>
 
@@ -212,7 +567,7 @@ const Dashboard = () => {
 
           <div className="stack-list">
             {newsletters.length ? (
-              newsletters.slice(0, 4).map((email) => <EmailCard key={email.id} email={email} compact onUpdate={fetchEmails} />)
+              newsletters.slice(0, 4).map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshEmailInsights} />)
             ) : (
               <div className="empty-card">No newsletters or promotional items are waiting right now.</div>
             )}
@@ -232,7 +587,7 @@ const Dashboard = () => {
 
             <div className="stack-list">
               {card.items.length ? (
-                card.items.map((email) => <EmailCard key={email.id} email={email} compact onUpdate={fetchEmails} />)
+                card.items.map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshEmailInsights} />)
               ) : (
                 <div className="empty-card">Nothing is waiting in this lane right now.</div>
               )}

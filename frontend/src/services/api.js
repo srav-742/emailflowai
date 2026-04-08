@@ -36,12 +36,21 @@ export const emailAPI = {
   getStats: () => api.get('/emails/stats'),
   classifyEmails: () => api.post('/emails/classify'),
   summarizeEmail: (id) => api.post(`/emails/${id}/summarize`),
+  extractTasks: (id) => api.post(`/emails/${id}/extract-tasks`),
   sendReply: (id, body) => api.post(`/emails/${id}/reply/send`, { body }),
 
   aiSummarize: (id) => api.post(`/emails/ai/${id}/summarize`),
   aiClassify: (id) => api.post(`/emails/ai/${id}/classify`),
   aiGenerateReply: (id, tone = 'professional') => api.post(`/emails/ai/${id}/reply`, { tone }),
   aiProcessAll: () => api.post('/emails/ai/process-all'),
+};
+
+export const aiAPI = {
+  getMorningBrief: () => api.get('/ai/morning-brief'),
+  getAnalytics: () => api.get('/ai/analytics'),
+  trainStyle: () => api.post('/ai/style/train'),
+  updatePreferences: (importantContacts) => api.put('/ai/preferences', { importantContacts }),
+  getAccounts: () => api.get('/ai/accounts'),
 };
 
 export default api;

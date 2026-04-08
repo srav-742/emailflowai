@@ -10,20 +10,26 @@ model User {
   id               String    @id @default(uuid())
   email            String    @unique
   name             String?
+  plan             String    @default("free")
   profileImage     String?   @map("profile_image")
   oauthProvider    String?   @map("oauth_provider")
   firebaseUid      String?   @map("firebase_uid")
+  stripeCustomerId String?   @map("stripe_customer_id")
   accessToken      String?   @db.Text @map("access_token")
   refreshToken     String?   @db.Text @map("refresh_token")
   tokenExpiry      DateTime? @map("token_expiry")
   gmailConnectedAt DateTime? @map("gmail_connected_at")
   lastLogin        DateTime? @map("last_login")
   lastSyncAt       DateTime? @map("last_sync_at")
+  style            Json?
+  importantContacts String[] @default([]) @map("important_contacts")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
   emails           Email[]
   aiLogs           AILog[]
+  emailAccounts    EmailAccount[]
+  stats            UserStats?
 
   @@map("users")
 }
@@ -31,12 +37,14 @@ model User {
 model Email {
   id             String    @id @default(uuid())
   userId         String    @map("user_id")
+  accountId      String?   @map("account_id")
   messageId      String?   @unique @map("message_id")
   threadId       String?   @map("thread_id")
   subject        String?
   body           String?   @db.Text
   snippet        String?
   summary        String?   @db.Text
+  tasks          Json?
   priority       String    @default("normal")
   category       String    @default("general")
   labels         String[]  @default([])
@@ -45,18 +53,57 @@ model Email {
   senderName     String?   @map("sender_name")
   recipients     String[]  @map("recipients")
   gmailLabelIds  String[]  @default([]) @map("gmail_label_ids")
+  isSent         Boolean   @default(false) @map("is_sent")
+  followUp       Boolean   @default(false) @map("follow_up")
+  followUpAt     DateTime? @map("follow_up_at")
   receivedAt     DateTime  @default(now()) @map("received_at")
   isRead         Boolean   @default(false) @map("is_read")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account        EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
   aiLogs         AILog[]
 
   @@index([userId])
+  @@index([accountId])
   @@index([category])
   @@index([priority])
   @@map("emails")
+}
+
+model EmailAccount {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  provider     String
+  email        String
+  accessToken  String?  @db.Text @map("access_token")
+  refreshToken String?  @db.Text @map("refresh_token")
+  tokenExpiry  DateTime? @map("token_expiry")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  lastSyncAt   DateTime? @map("last_sync_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails       Email[]
+
+  @@index([userId])
+  @@unique([provider, email])
+  @@map("email_accounts")
+}
+
+model UserStats {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  emailsProcessed Int      @default(0) @map("emails_processed")
+  aiActions       Int      @default(0) @map("ai_actions")
+  timeSaved       Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_stats")
 }
 
 model AILog {

@@ -1,13 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { emailAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import EmailCard from '../components/EmailCard';
+import { connectSocket, disconnectSocket } from '../services/socket';
 import './EmailList.css';
 
 const EmailList = ({ filter = {}, title = 'Inbox command center', description = 'Review and process every thread in one place.' }) => {
+  const { user } = useAuth();
   const [emails, setEmails] = useState([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
+  const [liveMessage, setLiveMessage] = useState('');
+  const [syncMessage, setSyncMessage] = useState('');
 
   const fetchEmails = useCallback(async () => {
     try {
@@ -37,6 +42,30 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
     fetchEmails();
   }, [fetchEmails]);
 
+  useEffect(() => {
+    if (!user?.id || !user?.hasGmailAccess) {
+      return undefined;
+    }
+
+    const socket = connectSocket(user.id);
+    if (!socket) {
+      return undefined;
+    }
+
+    const handleNewEmails = (incomingEmails = []) => {
+      const count = Array.isArray(incomingEmails) ? incomingEmails.length : 0;
+      setLiveMessage(count ? `${count} new email${count > 1 ? 's' : ''} arrived just now.` : 'Inbox updated.');
+      void fetchEmails();
+    };
+
+    socket.on('new-emails', handleNewEmails);
+
+    return () => {
+      socket.off('new-emails', handleNewEmails);
+      disconnectSocket();
+    };
+  }, [fetchEmails, user?.hasGmailAccess, user?.id]);
+
   const handlePageChange = (newPage) => {
     setPagination((prev) => ({ ...prev, page: newPage }));
   };
@@ -44,10 +73,13 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
   const handleSync = async () => {
     try {
       setLoading(true);
-      await emailAPI.syncEmails();
+      const response = await emailAPI.syncEmails();
+      setSyncMessage(response.data.warning || response.data.message || 'Inbox synced successfully.');
       await fetchEmails();
     } catch (error) {
       console.error('Failed to sync emails:', error);
+      setSyncMessage(error.response?.data?.error || 'Unable to sync Gmail right now. Your saved inbox is still available.');
+    } finally {
       setLoading(false);
     }
   };
@@ -90,6 +122,10 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
 
       <div className="list-summary-row">
         <span className="status-pill status-ok">Showing {emails.length} of {pagination.total} emails</span>
+        {liveMessage ? <span className="status-pill">{liveMessage}</span> : null}
+        {syncMessage ? (
+          <span className={`status-pill ${/unable|unavailable|failed/i.test(syncMessage) ? 'status-warn' : 'status-ok'}`}>{syncMessage}</span>
+        ) : null}
       </div>
 
       <div className="stack-list">

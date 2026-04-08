@@ -957,6 +957,63 @@ code {
   flex-wrap: wrap;
 }
 
+.live-sync-card,
+.live-sync-strip,
+.task-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.live-sync-strip {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.task-row,
+.mail-task-box,
+.mail-task-item {
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.task-row,
+.mail-task-box {
+  padding: 1rem 1.05rem;
+}
+
+.task-row,
+.mail-task-box,
+.mail-task-item,
+.mail-task-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.task-row-top,
+.task-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-row strong,
+.mail-task-item strong {
+  font-size: 0.98rem;
+}
+
+.task-row p,
+.mail-task-item p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.mail-task-item {
+  padding: 0.9rem;
+}
+
 .mail-label-accent {
   border-color: rgba(140, 242, 215, 0.28);
   color: var(--accent);

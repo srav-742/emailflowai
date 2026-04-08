@@ -54,6 +54,8 @@ model Email {
   recipients     String[]  @map("recipients")
   gmailLabelIds  String[]  @default([]) @map("gmail_label_ids")
   isSent         Boolean   @default(false) @map("is_sent")
+  isSentByUser   Boolean   @default(false) @map("is_sent_by_user")
+  isEditedReply  Boolean   @default(false) @map("is_edited_reply")
   followUp       Boolean   @default(false) @map("follow_up")
   followUpAt     DateTime? @map("follow_up_at")
   receivedAt     DateTime  @default(now()) @map("received_at")

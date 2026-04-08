@@ -11,10 +11,19 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
 
   const getPriorityColor = (priority) => {
     switch (priority) {
-      case 'high': return '#e53e3e';
-      case 'normal': return '#3182ce';
-      case 'low': return '#718096';
-      default: return '#a0aec0';
+      case 'high': return '#ef4444';
+      case 'normal': return '#3b82f6';
+      case 'low': return '#6b7280';
+      default: return '#9ca3af';
+    }
+  };
+
+  const getPriorityBg = (priority) => {
+    switch (priority) {
+      case 'high': return 'rgba(239, 68, 68, 0.1)';
+      case 'normal': return 'rgba(59, 130, 246, 0.1)';
+      case 'low': return 'rgba(107, 114, 128, 0.1)';
+      default: return 'rgba(156, 163, 175, 0.1)';
     }
   };
 
@@ -68,7 +77,9 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
     <article className={`mail-card ${compact ? 'mail-card-compact' : ''}`} data-legacy-icon={getCategoryIcon(email.category)}>
       <div className="mail-card-top">
         <button className="mail-card-header" onClick={() => setExpanded((value) => !value)}>
-          <span className="mail-avatar">{(email.senderName || email.sender || '?').slice(0, 1).toUpperCase()}</span>
+          <span className="mail-avatar" style={{ background: email.priority === 'high' ? 'linear-gradient(135deg, #ef4444, #f97316)' : 'linear-gradient(135deg, var(--highlight), var(--accent))' }}>
+            {(email.senderName || email.sender || '?').slice(0, 1).toUpperCase()}
+          </span>
           <div className="mail-card-meta">
             <strong>{email.subject || 'No subject'}</strong>
             <span>{email.senderName || email.sender || 'Unknown sender'}</span>
@@ -76,14 +87,27 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         </button>
 
         <div className="mail-card-side">
-          <span className={`mail-pill ${email.priority}`}>{email.priority || 'normal'}</span>
+          <span className="mail-pill" style={{
+            color: getPriorityColor(email.priority),
+            borderColor: `${getPriorityColor(email.priority)}40`,
+            background: getPriorityBg(email.priority)
+          }}>
+            {email.priority || 'normal'}
+          </span>
           <span className="mail-timestamp">{new Date(email.receivedAt || email.createdAt).toLocaleString()}</span>
         </div>
       </div>
 
-      <div className="mail-summary">
-        <p>{email.summary || email.snippet || 'No summary available yet. Run AI summarize to refresh this thread.'}</p>
-      </div>
+      {email.summary && (
+        <div className="mail-summary" style={{
+          background: 'rgba(59, 130, 246, 0.05)',
+          border: '1px solid rgba(59, 130, 246, 0.15)',
+          borderRadius: '12px',
+          padding: '0.85rem 1rem'
+        }}>
+          <p style={{ color: 'var(--muted-strong)' }}>{email.summary}</p>
+        </div>
+      )}
 
       <div className="mail-label-row">
         <span className="mail-category" style={{ borderColor: getPriorityColor(email.priority) }}>
@@ -108,7 +132,7 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
       {Array.isArray(email.tasks) && email.tasks.length > 0 && (
         <div className="mail-task-box">
           <div className="task-row-top">
-            <strong>Email tasks</strong>
+            <strong>📋 Extracted tasks</strong>
             <span className="mail-label">{email.tasks.length}</span>
           </div>
 
@@ -133,20 +157,20 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
 
       <div className="mail-actions">
         <button className="button button-ghost" onClick={handleAISummarize} disabled={summarizing}>
-          {summarizing ? 'Summarizing...' : 'AI summary'}
+          {summarizing ? '✨ Summarizing...' : '🤖 AI Summary'}
         </button>
         <button className="button button-ghost" onClick={handleAIClassify} disabled={classifying}>
-          {classifying ? 'Classifying...' : 'Reclassify'}
+          {classifying ? '🏷️ Classifying...' : '📊 Reclassify'}
         </button>
         <button className="button button-ghost" onClick={handleExtractTasks} disabled={extractingTasks}>
-          {extractingTasks ? 'Extracting tasks...' : 'Extract tasks'}
+          {extractingTasks ? '⏳ Extracting...' : '✅ Extract Tasks'}
         </button>
         <button className="button button-secondary" onClick={() => setShowReply((value) => !value)}>
-          {showReply ? 'Close draft' : 'Open reply'}
+          {showReply ? '✖ Close' : '✍️ Reply'}
         </button>
       </div>
 
-      {showReply && <ReplyGenerator email={email} onClose={() => setShowReply(false)} />}
+      {showReply && <ReplyGenerator email={email} onClose={() => setShowReply(false)} onSent={onUpdate} />}
     </article>
   );
 

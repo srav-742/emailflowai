@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { emailAPI } from '../services/api';
 
-const ReplyGenerator = ({ email, onClose }) => {
+const ReplyGenerator = ({ email, onClose, onSent }) => {
   const [tone, setTone] = useState('professional');
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
@@ -9,6 +9,9 @@ const ReplyGenerator = ({ email, onClose }) => {
   const [reply, setReply] = useState('');
   const [editing, setEditing] = useState(false);
   const [editedReply, setEditedReply] = useState('');
+  const [styleProfile, setStyleProfile] = useState(null);
+
+  const normalizeReply = (value = '') => String(value).replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
 
   const handleGenerateReply = async () => {
     try {
@@ -18,6 +21,7 @@ const ReplyGenerator = ({ email, onClose }) => {
       const generatedReply = response.data.reply;
       setReply(generatedReply);
       setEditedReply(generatedReply);
+      setStyleProfile(response.data.style || null);
     } catch (error) {
       console.error('Reply generation error:', error);
       setStatus('Reply draft could not be generated right now.');
@@ -34,7 +38,15 @@ const ReplyGenerator = ({ email, onClose }) => {
     try {
       setSending(true);
       setStatus('');
-      await emailAPI.sendReply(email.id, editedReply || reply);
+      const finalReply = editedReply || reply;
+      const wasEdited = Boolean(reply) && normalizeReply(finalReply) !== normalizeReply(reply);
+      await emailAPI.sendReply(email.id, finalReply, {
+        generatedReply: reply,
+        wasEdited,
+      });
+      if (onSent) {
+        await onSent();
+      }
       setStatus('Reply sent successfully.');
       setTimeout(() => {
         onClose();
@@ -74,6 +86,12 @@ const ReplyGenerator = ({ email, onClose }) => {
           {generating ? 'Generating...' : 'Generate draft'}
         </button>
       </div>
+
+      {styleProfile?.ready ? (
+        <div className="inline-alert">
+          Writing in your voice: {styleProfile.tone}, {styleProfile.sentenceLength} sentences, {styleProfile.signatureStyle}.
+        </div>
+      ) : null}
 
       {!!(reply || editedReply) && (
         <div className="reply-editor">

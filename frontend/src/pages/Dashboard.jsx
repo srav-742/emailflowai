@@ -47,6 +47,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [processingAI, setProcessingAI] = useState(false);
+  const [trainingStyle, setTrainingStyle] = useState(false);
   const [stats, setStats] = useState(null);
   const [brief, setBrief] = useState(null);
   const [analytics, setAnalytics] = useState(null);
@@ -105,6 +106,10 @@ const Dashboard = () => {
   const refreshEmailInsights = useCallback(async () => {
     await Promise.all([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics()]);
   }, [fetchAnalytics, fetchEmails, fetchMorningBrief, fetchStats]);
+
+  const refreshWorkspace = useCallback(async () => {
+    await Promise.all([refreshEmailInsights(), refreshProfile()]);
+  }, [refreshEmailInsights, refreshProfile]);
 
   useEffect(() => {
     let active = true;
@@ -256,6 +261,26 @@ const Dashboard = () => {
     }
   };
 
+  const handleTrainStyle = async () => {
+    try {
+      setTrainingStyle(true);
+      const response = await aiAPI.trainStyle();
+      await refreshProfile();
+      setNotice({
+        tone: response.data.ready ? 'ok' : 'warn',
+        text: response.data.message,
+      });
+    } catch (error) {
+      console.error('Style training error:', error);
+      setNotice({
+        tone: 'warn',
+        text: error.response?.data?.error || 'Writing style could not be trained right now.',
+      });
+    } finally {
+      setTrainingStyle(false);
+    }
+  };
+
   const actionQueue = emails.filter((email) => email.actionRequired || email.priority === 'high');
   const financeQueue = emails.filter((email) => email.category === 'finance');
   const developerQueue = emails.filter((email) => email.category === 'developer');
@@ -265,12 +290,12 @@ const Dashboard = () => {
     .flatMap((email) =>
       Array.isArray(email.tasks)
         ? email.tasks.map((task, index) => ({
-            ...task,
-            emailId: email.id,
-            emailSubject: email.subject || 'Untitled email',
-            emailSender: email.senderName || email.sender || 'Unknown sender',
-            taskKey: `${email.id}-${task.id || index}`,
-          }))
+          ...task,
+          emailId: email.id,
+          emailSubject: email.subject || 'Untitled email',
+          emailSender: email.senderName || email.sender || 'Unknown sender',
+          taskKey: `${email.id}-${task.id || index}`,
+        }))
         : [],
     )
     .filter((task) => !task.completed);
@@ -282,6 +307,8 @@ const Dashboard = () => {
   const visibleTasks = brief?.tasks?.length ? brief.tasks : pendingTasks.slice(0, 6);
   const analyticsCategories = [...(analytics?.byCategory || topCategories)].sort((left, right) => right.count - left.count).slice(0, 4);
   const recentAI = analytics?.recentAI || [];
+  const styleProfile = user?.style || null;
+  const styleReady = Boolean(styleProfile?.ready);
   const categoryCards = [
     { title: 'Action queue', description: 'Urgent asks and response-required threads.', items: actionQueue.slice(0, 4) },
     { title: 'Finance', description: 'Invoices, approvals, receipts, and payment updates.', items: financeQueue.slice(0, 4) },
@@ -337,6 +364,9 @@ const Dashboard = () => {
           </button>
           <button className="button button-secondary" onClick={handleProcessAI} disabled={processingAI || !emails.length}>
             {processingAI ? 'Processing with AI...' : 'AI process current inbox'}
+          </button>
+          <button className="button button-ghost" onClick={handleTrainStyle} disabled={trainingStyle}>
+            {trainingStyle ? 'Training style...' : 'Train my writing style'}
           </button>
         </div>
       </section>
@@ -396,54 +426,118 @@ const Dashboard = () => {
         <div className="surface-card brief-card">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Morning brief</span>
+              <span className="eyebrow">📊 Morning Brief</span>
               <h3>{brief?.headline || 'What deserves your attention first'}</h3>
             </div>
           </div>
 
-          <p>{brief?.summary || 'Your dashboard will summarize urgent emails, follow-ups, and task load here as soon as enough inbox data is available.'}</p>
+          <p style={{ marginBottom: '1.2rem' }}>{brief?.summary || 'Your dashboard will summarize urgent emails, follow-ups, and task load here as soon as enough inbox data is available.'}</p>
 
           <div className="brief-grid">
             <article className="brief-stat">
               <strong>{brief?.counts?.important ?? actionQueue.length}</strong>
-              <span>Urgent emails</span>
+              <span>🔴 Urgent emails</span>
               <p>Threads that look high priority or likely need a quick response.</p>
             </article>
             <article className="brief-stat">
               <strong>{brief?.counts?.tasks ?? pendingTasks.length}</strong>
-              <span>Open tasks</span>
+              <span>✅ Open tasks</span>
               <p>Action items the system extracted from incoming emails.</p>
             </article>
             <article className="brief-stat">
               <strong>{brief?.counts?.followUps ?? followUpEmails.length}</strong>
-              <span>Follow-ups</span>
+              <span>🔄 Follow-ups</span>
               <p>Sent conversations that look ready for a polite nudge.</p>
             </article>
             <article className="brief-stat">
               <strong>{lastSyncLabel}</strong>
-              <span>Last sync</span>
+              <span>🕒 Last sync</span>
               <p>Your latest successful workspace refresh timestamp.</p>
             </article>
           </div>
 
-          <div className="stack-list">
-            {urgentEmails.length ? (
-              urgentEmails.slice(0, 3).map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshEmailInsights} />)
-            ) : (
-              <div className="empty-card">No urgent emails are competing for your attention right now.</div>
-            )}
-          </div>
+          {urgentEmails.length > 0 && (
+            <>
+              <div className="section-heading" style={{ marginTop: '1.5rem' }}>
+                <div>
+                  <span className="eyebrow">🚨 Urgent Emails</span>
+                </div>
+              </div>
+              <div className="stack-list">
+                {urgentEmails.slice(0, 3).map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshWorkspace} />)}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="surface-card">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Analytics</span>
+              <span className="eyebrow">✍️ Writing Style</span>
+              <h3>{styleReady ? 'Replies are learning your voice' : 'Teach the assistant how you naturally write'}</h3>
+            </div>
+          </div>
+
+          <p style={{ marginBottom: '1.2rem' }}>
+            {styleReady
+              ? styleProfile.styleSummary || 'Your assistant is shaping replies to match your real writing style.'
+              : `Train after at least ${styleProfile?.minSamples || 5} sent emails so replies sound more like you.`}
+          </p>
+
+          <div className="brief-grid">
+            <article className="brief-stat">
+              <strong>{styleProfile?.sampleCount ?? 0}</strong>
+              <span>Training samples</span>
+              <p>Sent emails and edited replies currently available for learning.</p>
+            </article>
+            <article className="brief-stat">
+              <strong>{styleProfile?.tone || 'Not trained'}</strong>
+              <span>Tone</span>
+              <p>{styleProfile?.greetingStyle || 'Train style to detect your preferred opening.'}</p>
+            </article>
+            <article className="brief-stat">
+              <strong>{styleProfile?.sentenceLength || 'Not trained'}</strong>
+              <span>Sentence length</span>
+              <p>{styleProfile?.signatureStyle || 'Train style to learn your sign-off style.'}</p>
+            </article>
+            <article className="brief-stat">
+              <strong>{styleProfile?.updatedAt ? formatDateTime(styleProfile.updatedAt) : 'Pending'}</strong>
+              <span>Last trained</span>
+              <p>{styleReady ? 'Updated from your sent mail history.' : 'Send or edit more replies, then train again.'}</p>
+            </article>
+          </div>
+
+          {Array.isArray(styleProfile?.commonPhrases) && styleProfile.commonPhrases.length > 0 && (
+            <>
+              <div className="section-heading" style={{ marginTop: '1.5rem' }}>
+                <div>
+                  <span className="eyebrow">Common Phrases</span>
+                </div>
+              </div>
+              <div className="stack-list">
+                {styleProfile.commonPhrases.map((phrase) => (
+                  <article key={phrase} className="task-row">
+                    <div className="task-row-top">
+                      <strong>{phrase}</strong>
+                      <span className="mail-label">Common phrase</span>
+                    </div>
+                    <p>The assistant can echo this phrasing naturally in future drafts when it fits.</p>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="surface-card">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">📈 Analytics</span>
               <h3>How the assistant is helping across your inbox</h3>
             </div>
           </div>
 
-          <div className="brief-grid">
+          <div className="brief-grid" style={{ marginBottom: '1.5rem' }}>
             <article className="brief-stat">
               <strong>{analytics?.emailsProcessed ?? 0}</strong>
               <span>Emails processed</span>
@@ -466,47 +560,61 @@ const Dashboard = () => {
             </article>
           </div>
 
-          <div className="category-meter-grid">
-            {analyticsCategories.map((entry) => (
-              <div key={entry.category} className="category-meter">
-                <div className="category-meter-top">
-                  <strong>{entry.category}</strong>
-                  <span>{entry.count}</span>
-                </div>
-                <div className="category-meter-bar">
-                  <span style={{ width: `${Math.min(100, (entry.count / Math.max(analytics?.totalEmails || stats?.totalEmails || 1, 1)) * 100)}%` }}></span>
+          {analyticsCategories.length > 0 && (
+            <>
+              <div className="section-heading" style={{ marginBottom: '1rem' }}>
+                <div>
+                  <span className="eyebrow">Email Categories</span>
                 </div>
               </div>
-            ))}
-          </div>
-
-          <div className="stack-list">
-            {recentAI.length ? (
-              recentAI.map((entry, index) => (
-                <article key={`${entry.actionType}-${entry.createdAt}-${index}`} className="task-row">
-                  <div className="task-row-top">
-                    <strong>{entry.actionType.replace(/_/g, ' ')}</strong>
-                    <span className="mail-label">{entry.model || 'assistant'}</span>
+              <div className="category-meter-grid" style={{ marginBottom: '1.5rem' }}>
+                {analyticsCategories.map((entry) => (
+                  <div key={entry.category} className="category-meter">
+                    <div className="category-meter-top">
+                      <strong>{entry.category}</strong>
+                      <span>{entry.count}</span>
+                    </div>
+                    <div className="category-meter-bar">
+                      <span style={{ width: `${Math.min(100, (entry.count / Math.max(analytics?.totalEmails || stats?.totalEmails || 1, 1)) * 100)}%` }}></span>
+                    </div>
                   </div>
-                  <p>{formatDateTime(entry.createdAt)}</p>
-                </article>
-              ))
-            ) : (
-              <div className="empty-card">Run AI summarize, classify, or process-all to start building analytics history.</div>
-            )}
-          </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {recentAI.length > 0 && (
+            <>
+              <div className="section-heading" style={{ marginBottom: '1rem' }}>
+                <div>
+                  <span className="eyebrow">Recent AI Activity</span>
+                </div>
+              </div>
+              <div className="stack-list">
+                {recentAI.map((entry, index) => (
+                  <article key={`${entry.actionType}-${entry.createdAt}-${index}`} className="task-row">
+                    <div className="task-row-top">
+                      <strong>{entry.actionType.replace(/_/g, ' ')}</strong>
+                      <span className="mail-label">{entry.model || 'assistant'}</span>
+                    </div>
+                    <p>{formatDateTime(entry.createdAt)}</p>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="surface-card">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Follow-up queue</span>
+              <span className="eyebrow">🔄 Follow-up Queue</span>
               <h3>Sent conversations that look ready for a reminder</h3>
             </div>
           </div>
 
           <div className="task-list">
-            {followUpEmails.length ? (
+            {followUpEmails.length > 0 ? (
               followUpEmails.slice(0, 6).map((email) => (
                 <article key={email.id} className="task-row">
                   <div className="task-row-top">
@@ -521,7 +629,10 @@ const Dashboard = () => {
                 </article>
               ))
             ) : (
-              <div className="empty-card">No follow-up reminders are pending right now.</div>
+              <div className="empty-card">
+                <h3>No follow-ups pending</h3>
+                <p>No follow-up reminders are pending right now.</p>
+              </div>
             )}
           </div>
         </div>
@@ -529,13 +640,13 @@ const Dashboard = () => {
         <div className="surface-card">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Task board</span>
+              <span className="eyebrow">✅ Task Board</span>
               <h3>Action items pulled directly from incoming emails</h3>
             </div>
           </div>
 
           <div className="task-list">
-            {visibleTasks.length ? (
+            {visibleTasks.length > 0 ? (
               visibleTasks.map((task) => (
                 <article key={task.taskKey} className="task-row">
                   <div className="task-row-top">
@@ -551,7 +662,8 @@ const Dashboard = () => {
               ))
             ) : (
               <div className="empty-card">
-                No tasks have been extracted yet. Sync Gmail or run AI processing to build your task queue.
+                <h3>No tasks extracted</h3>
+                <p>Sync Gmail or run AI processing to build your task queue.</p>
               </div>
             )}
           </div>
@@ -560,16 +672,19 @@ const Dashboard = () => {
         <div className="surface-card">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Read later</span>
+              <span className="eyebrow">📰 Read Later</span>
               <h3>Low-noise threads worth batching</h3>
             </div>
           </div>
 
           <div className="stack-list">
-            {newsletters.length ? (
-              newsletters.slice(0, 4).map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshEmailInsights} />)
+            {newsletters.length > 0 ? (
+              newsletters.slice(0, 4).map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshWorkspace} />)
             ) : (
-              <div className="empty-card">No newsletters or promotional items are waiting right now.</div>
+              <div className="empty-card">
+                <h3>No newsletters</h3>
+                <p>No newsletters or promotional items are waiting right now.</p>
+              </div>
             )}
           </div>
         </div>
@@ -587,7 +702,7 @@ const Dashboard = () => {
 
             <div className="stack-list">
               {card.items.length ? (
-                card.items.map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshEmailInsights} />)
+                card.items.map((email) => <EmailCard key={email.id} email={email} compact onUpdate={refreshWorkspace} />)
               ) : (
                 <div className="empty-card">Nothing is waiting in this lane right now.</div>
               )}

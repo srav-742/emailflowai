@@ -37,7 +37,7 @@ export const emailAPI = {
   classifyEmails: () => api.post('/emails/classify'),
   summarizeEmail: (id) => api.post(`/emails/${id}/summarize`),
   extractTasks: (id) => api.post(`/emails/${id}/extract-tasks`),
-  sendReply: (id, body) => api.post(`/emails/${id}/reply/send`, { body }),
+  sendReply: (id, body, options = {}) => api.post(`/emails/${id}/reply/send`, { body, ...options }),
 
   aiSummarize: (id) => api.post(`/emails/ai/${id}/summarize`),
   aiClassify: (id) => api.post(`/emails/ai/${id}/classify`),

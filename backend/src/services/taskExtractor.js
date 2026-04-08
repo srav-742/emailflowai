@@ -1,14 +1,14 @@
 const axios = require('axios');
 
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const XAI_API_URL = process.env.XAI_API_URL || 'https://api.x.ai/v1/chat/completions';
+const XAI_MODEL = process.env.XAI_MODEL || 'grok-4-fast-non-reasoning';
 
 const PRIORITY_LEVELS = new Set(['low', 'medium', 'high']);
 const ACTIONABLE_PATTERN =
   /\b(please|can you|could you|kindly|need to|follow up|schedule|send|share|review|submit|prepare|update|reply|deadline|asap|urgent)\b/i;
 
-let groqTaskCooldownUntil = 0;
-let groqTaskCooldownReason = null;
+let xaiTaskCooldownUntil = 0;
+let xaiTaskCooldownReason = null;
 
 function cleanJsonBlock(value = '') {
   return value.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -51,21 +51,36 @@ function extractRateLimitMessage(error) {
   );
 }
 
-function isGroqRateLimitError(error) {
+function isXAIRateLimitError(error) {
   const code = String(error?.response?.data?.error?.code || error?.code || '').toLowerCase();
   const message = extractRateLimitMessage(error).toLowerCase();
 
   return code === 'rate_limit_exceeded' || code === 'tokens' || message.includes('rate limit');
 }
 
-function enterGroqTaskCooldown(error) {
+function isXAICreditsOrPermissionError(error) {
+  const code = String(error?.response?.data?.error?.code || error?.code || '').toLowerCase();
+  const message = extractRateLimitMessage(error).toLowerCase();
+
+  return (
+    code === 'permission_denied' ||
+    code === 'insufficient_credits' ||
+    code === 'unauthorized' ||
+    message.includes('permission') ||
+    message.includes('credit') ||
+    message.includes('license') ||
+    message.includes('does not have permission')
+  );
+}
+
+function enterXAITaskCooldown(error) {
   const message = extractRateLimitMessage(error);
   const retryAfterMs = parseRetryAfterMs(message) || 15 * 60 * 1000;
-  groqTaskCooldownUntil = Date.now() + retryAfterMs;
-  groqTaskCooldownReason = message;
+  xaiTaskCooldownUntil = Date.now() + retryAfterMs;
+  xaiTaskCooldownReason = message;
 
   console.warn(
-    `Task extraction AI is cooling down until ${new Date(groqTaskCooldownUntil).toLocaleTimeString()}. Falling back to local extraction.`,
+    `xAI task extraction is cooling down until ${new Date(xaiTaskCooldownUntil).toLocaleTimeString()}. Falling back to local extraction.`,
   );
 }
 
@@ -220,7 +235,7 @@ function extractTasksFallback(email = {}) {
 }
 
 async function extractTasksWithAI(email = {}) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
     return extractTasksFallback(email);
   }
@@ -229,13 +244,13 @@ async function extractTasksWithAI(email = {}) {
     return extractTasksFallback(email);
   }
 
-  if (groqTaskCooldownUntil > Date.now()) {
+  if (xaiTaskCooldownUntil > Date.now()) {
     return extractTasksFallback(email);
   }
 
-  if (groqTaskCooldownUntil && groqTaskCooldownUntil <= Date.now()) {
-    groqTaskCooldownUntil = 0;
-    groqTaskCooldownReason = null;
+  if (xaiTaskCooldownUntil && xaiTaskCooldownUntil <= Date.now()) {
+    xaiTaskCooldownUntil = 0;
+    xaiTaskCooldownReason = null;
   }
 
   const prompt = [
@@ -253,9 +268,9 @@ async function extractTasksWithAI(email = {}) {
 
   try {
     const response = await axios.post(
-      GROQ_API_URL,
+      XAI_API_URL,
       {
-        model: GROQ_MODEL,
+        model: XAI_MODEL,
         messages: [
           {
             role: 'system',
@@ -280,12 +295,12 @@ async function extractTasksWithAI(email = {}) {
     const tasks = parseTasksResponse(content);
     return tasks.length ? tasks : extractTasksFallback(email);
   } catch (error) {
-    if (isGroqRateLimitError(error)) {
-      enterGroqTaskCooldown(error);
+    if (isXAIRateLimitError(error) || isXAICreditsOrPermissionError(error)) {
+      enterXAITaskCooldown(error);
       return extractTasksFallback(email);
     }
 
-    console.error('Task extraction error:', error.response?.data || error.message || error);
+    // Fallback to local extraction on any error
     return extractTasksFallback(email);
   }
 }

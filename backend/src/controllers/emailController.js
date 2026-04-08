@@ -1,10 +1,10 @@
 const prisma = require('../config/database');
 const { analyzeEmailIntelligence, generateSummary } = require('../utils/classifier');
-const { summarizeEmail: groqSummarize, classifyEmail: groqClassify, generateReply } = require('../utils/groq');
+const { summarizeEmail: xaiSummarize, classifyEmail: xaiClassify, generateReply, XAI_MODEL } = require('../utils/xai');
 const { extractTasksWithAI } = require('../services/taskExtractor');
 const { getAuthenticatedUser, syncInbox } = require('../services/inboxSyncService');
 const { trackAIAction } = require('../services/analyticsService');
-const { getOrCreateStyleProfile } = require('../services/styleService');
+const { getOrCreateStyleProfile, refreshStyleProfileIfReady } = require('../services/styleService');
 const { emitEmailNotifications } = require('../services/notificationService');
 const { detectFollowUps } = require('../services/followUpService');
 const { getGmailClient } = require('../utils/gmailClient');
@@ -32,6 +32,10 @@ function buildReplyRawMessage({ to, subject, body }) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/g, '');
+}
+
+function normalizeReplyText(value = '') {
+  return String(value || '').replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeStoredPriority(value) {
@@ -326,7 +330,7 @@ const extractEmailTasks = async (req, res) => {
         actionType: 'extract_tasks',
         prompt: `Extract tasks from: ${email.subject || 'Untitled email'}`,
         response: JSON.stringify(tasks),
-        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+        model: XAI_MODEL,
       },
     });
 
@@ -356,7 +360,7 @@ const aiSummarize = async (req, res) => {
       return res.status(404).json({ error: 'Email not found' });
     }
 
-    const summary = await groqSummarize(buildEmailContent(email), email.subject || '');
+    const summary = await xaiSummarize(buildEmailContent(email), email.subject || '');
     const updatedEmail = await prisma.email.update({
       where: { id: email.id },
       data: { summary },
@@ -369,7 +373,7 @@ const aiSummarize = async (req, res) => {
         actionType: 'summary',
         prompt: `Summarize: ${email.subject}`,
         response: summary,
-        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+        model: XAI_MODEL,
       },
     });
 
@@ -395,7 +399,7 @@ const aiClassify = async (req, res) => {
       return res.status(404).json({ error: 'Email not found' });
     }
 
-    const classification = await groqClassify(buildEmailContent(email));
+    const classification = await xaiClassify(buildEmailContent(email));
 
     const updatedEmail = await prisma.email.update({
       where: { id: email.id },
@@ -414,7 +418,7 @@ const aiClassify = async (req, res) => {
         actionType: 'classify',
         prompt: `Classify: ${email.subject}`,
         response: JSON.stringify(classification),
-        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+        model: XAI_MODEL,
       },
     });
 
@@ -452,7 +456,7 @@ const aiGenerateReply = async (req, res) => {
         actionType: 'reply',
         prompt: `Reply to: ${email.subject} (tone: ${tone})`,
         response: reply,
-        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+        model: XAI_MODEL,
       },
     });
 
@@ -467,7 +471,7 @@ const aiGenerateReply = async (req, res) => {
 
 const sendReply = async (req, res) => {
   try {
-    const { body } = req.body;
+    const { body, generatedReply = '', wasEdited } = req.body;
 
     if (!body?.trim()) {
       return res.status(400).json({ error: 'Reply body is required' });
@@ -513,9 +517,71 @@ const sendReply = async (req, res) => {
       },
     });
 
+    const normalizedSubject = /^re:/i.test(email.subject || '') ? email.subject || 'Your message' : `Re: ${email.subject || 'Your message'}`;
+    const userEditedReply =
+      typeof wasEdited === 'boolean' ? wasEdited : normalizeReplyText(body) !== normalizeReplyText(generatedReply);
+
+    if (result.data.id) {
+      await prisma.email.upsert({
+        where: {
+          userId_messageId: {
+            userId: req.user.id,
+            messageId: result.data.id,
+          },
+        },
+        update: {
+          subject: normalizedSubject,
+          body: body.trim(),
+          snippet: body.trim().slice(0, 200),
+          summary: generateSummary(normalizedSubject, body.trim(), body.trim()),
+          priority: email.priority || 'normal',
+          category: email.category || 'general',
+          labels: Array.isArray(email.labels) ? email.labels : [],
+          actionRequired: false,
+          sender: user.email,
+          senderName: user.name || user.email,
+          recipients: email.sender ? [email.sender] : [],
+          gmailLabelIds: ['SENT'],
+          isSent: true,
+          isSentByUser: true,
+          isEditedReply: userEditedReply,
+          isRead: true,
+          threadId: result.data.threadId || email.threadId || null,
+          receivedAt: new Date(),
+        },
+        create: {
+          userId: req.user.id,
+          messageId: result.data.id,
+          subject: normalizedSubject,
+          body: body.trim(),
+          snippet: body.trim().slice(0, 200),
+          summary: generateSummary(normalizedSubject, body.trim(), body.trim()),
+          priority: email.priority || 'normal',
+          category: email.category || 'general',
+          labels: Array.isArray(email.labels) ? email.labels : [],
+          actionRequired: false,
+          sender: user.email,
+          senderName: user.name || user.email,
+          recipients: email.sender ? [email.sender] : [],
+          gmailLabelIds: ['SENT'],
+          isSent: true,
+          isSentByUser: true,
+          isEditedReply: userEditedReply,
+          isRead: true,
+          threadId: result.data.threadId || email.threadId || null,
+          receivedAt: new Date(),
+        },
+      });
+    }
+
+    void refreshStyleProfileIfReady(req.user.id).catch((styleError) => {
+      console.error('Style auto-refresh error:', styleError.message || styleError);
+    });
+
     res.json({
       message: 'Reply sent successfully',
       sentMessageId: result.data.id,
+      wasEdited: userEditedReply,
     });
   } catch (error) {
     console.error('Send reply error:', error.response?.data || error.message || error);
@@ -535,8 +601,8 @@ const aiProcessAll = async (req, res) => {
     for (const email of emails) {
       try {
         const [classification, summary, tasks] = await Promise.all([
-          groqClassify(buildEmailContent(email)),
-          groqSummarize(buildEmailContent(email), email.subject || ''),
+          xaiClassify(buildEmailContent(email)),
+          xaiSummarize(buildEmailContent(email), email.subject || ''),
           extractTasksWithAI(email),
         ]);
 
@@ -559,7 +625,7 @@ const aiProcessAll = async (req, res) => {
             actionType: 'classify_and_summarize',
             prompt: `Process: ${email.subject}`,
             response: JSON.stringify({ classification, summary, tasks }),
-            model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+            model: XAI_MODEL,
           },
         });
 

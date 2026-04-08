@@ -305,8 +305,8 @@ code {
 }
 
 .auth-hero-copy,
-.auth-card-header > div,
-.section-heading > div,
+.auth-card-header>div,
+.section-heading>div,
 .hero-copy {
   position: relative;
   z-index: 1;
@@ -456,7 +456,14 @@ code {
   justify-content: center;
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 800;
+  font-size: 1.1rem;
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.mail-card-header:hover .mail-avatar {
+  transform: scale(1.05);
 }
 
 .brand-badge {
@@ -875,13 +882,23 @@ code {
 
 .mail-card {
   border-radius: 22px;
-  padding: 1.15rem;
+  padding: 1.25rem;
   display: grid;
-  gap: 0.95rem;
+  gap: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
+}
+
+.mail-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 .mail-card-compact {
   padding: 1rem;
+  gap: 0.85rem;
 }
 
 .mail-card-header {
@@ -893,19 +910,32 @@ code {
   color: inherit;
   text-align: left;
   padding: 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.mail-card-header:hover {
+  opacity: 0.9;
 }
 
 .mail-card-meta {
   display: grid;
-  gap: 0.25rem;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .mail-card-meta strong {
-  font-size: 1.02rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mail-card-meta span {
   color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .mail-card-side {
@@ -920,10 +950,20 @@ code {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 0.36rem 0.72rem;
+  padding: 0.35rem 0.7rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+  transition: all 0.15s ease;
+}
+
+.mail-pill:hover,
+.mail-label:hover {
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
 }
 
 .mail-pill.high {
@@ -941,20 +981,49 @@ code {
   border-color: rgba(255, 210, 128, 0.24);
 }
 
-.mail-summary p,
-.mail-body-preview p,
-.reply-preview p,
-.empty-card p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.68;
+.mail-summary {
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: rgba(59, 130, 246, 0.05);
+  border: 1px solid rgba(59, 130, 246, 0.15);
 }
 
-.mail-label-row,
+.mail-summary p {
+  margin: 0;
+  color: var(--muted-strong);
+  line-height: 1.68;
+  font-size: 0.92rem;
+}
+
+.mail-label-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .mail-actions {
   display: flex;
-  gap: 0.55rem;
+  gap: 0.65rem;
   flex-wrap: wrap;
+  align-items: center;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mail-actions .button {
+  font-size: 0.88rem;
+  padding: 0.75rem 1.1rem;
+  transition: all 0.2s ease;
+}
+
+.mail-actions .button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.mail-actions .button:active {
+  transform: translateY(0);
 }
 
 .live-sync-card,
@@ -974,6 +1043,14 @@ code {
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
+  transition: all 0.2s ease;
+}
+
+.task-row:hover,
+.mail-task-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
 }
 
 .task-row,
@@ -1051,9 +1128,29 @@ code {
   justify-content: center;
 }
 
+.empty-card {
+  border-radius: var(--radius-md);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.8rem 1.5rem;
+  text-align: center;
+  display: grid;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .empty-card h3 {
   margin: 0 0 0.45rem;
   font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.15rem;
+  color: var(--muted-strong);
+}
+
+.empty-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 0.9rem;
 }
 
 @keyframes spin {
@@ -1069,6 +1166,7 @@ code {
 }
 
 @media (max-width: 1180px) {
+
   .auth-shell,
   .auth-shell-wide,
   .app-shell,
@@ -1091,6 +1189,7 @@ code {
 }
 
 @media (max-width: 860px) {
+
   .auth-shell,
   .app-shell {
     padding: 1rem;
@@ -1119,6 +1218,7 @@ code {
 }
 
 @media (max-width: 640px) {
+
   .auth-hero-copy h1,
   .hero-copy h2 {
     max-width: none;

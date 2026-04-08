@@ -181,6 +181,7 @@ async function persistEmail(userId, payload, existingEmail) {
     recipients: payload.recipients,
     gmailLabelIds: payload.gmailLabelIds,
     isSent: payload.isSent,
+    isSentByUser: payload.isSent,
     isRead: payload.isRead,
     threadId: payload.threadId,
     receivedAt: payload.receivedAt,

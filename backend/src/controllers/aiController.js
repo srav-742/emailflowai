@@ -25,10 +25,14 @@ const morningBrief = async (req, res) => {
 
 const trainStyle = async (req, res) => {
   try {
-    const style = await learnUserStyle(req.user.id);
+    const result = await learnUserStyle(req.user.id);
     res.json({
-      message: 'Style profile updated successfully',
-      style,
+      message: result.message,
+      ready: result.ready,
+      style: result.style,
+      sampleCount: result.sampleCount,
+      minSamples: result.minSamples,
+      remainingSamples: result.remainingSamples,
     });
   } catch (error) {
     console.error('Style training error:', error);

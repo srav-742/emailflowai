@@ -46,11 +46,12 @@ export const emailAPI = {
 };
 
 export const aiAPI = {
-  getMorningBrief: () => api.get('/ai/morning-brief'),
-  getAnalytics: () => api.get('/ai/analytics'),
-  trainStyle: () => api.post('/ai/style/train'),
+  getMorningBrief:   () => api.get('/ai/morning-brief'),
+  getAnalytics:      () => api.get('/ai/analytics'),
+  trainStyle:        () => api.post('/ai/style/train'),
   updatePreferences: (importantContacts) => api.put('/ai/preferences', { importantContacts }),
-  getAccounts: () => api.get('/ai/accounts'),
+  getAccounts:       () => api.get('/ai/accounts'),
+  getInboxSummary:   (limit = 20) => api.get('/ai/inbox-summary', { params: { limit } }),
 };
 
 export default api;

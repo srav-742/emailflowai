@@ -11,6 +11,8 @@ const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
 const { getUserSocketRoom } = require('./utils/socketRooms');
 const { startEmailPolling } = require('./services/emailSyncService');
+const redis = require('./redisClient');
+
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -87,9 +89,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Add security headers to prevent COOP warnings
+// Security headers — use unsafe-none for COOP to allow Google OAuth popup communication
 app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });
@@ -118,6 +120,7 @@ app.use('/api/ai', aiRoutes);
 
 app.get('/api/health', async (req, res) => {
   let database = 'disconnected';
+  let redisStatus = 'disconnected';
 
   try {
     await prisma.$queryRawUnsafe('SELECT 1');
@@ -126,9 +129,17 @@ app.get('/api/health', async (req, res) => {
     database = 'error';
   }
 
+  try {
+    await redis.ping();
+    redisStatus = 'connected';
+  } catch (error) {
+    redisStatus = 'error';
+  }
+
   res.json({
-    status: database === 'connected' ? 'ok' : 'degraded',
+    status: (database === 'connected' && redisStatus === 'connected') ? 'ok' : 'degraded',
     database,
+    redis: redisStatus,
     firebaseProject: process.env.FIREBASE_PROJECT_ID || null,
     timestamp: new Date().toISOString(),
   });
@@ -195,6 +206,7 @@ app.use((err, req, res, next) => {
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🤖 Groq AI: ${process.env.GROQ_API_KEY ? '✅ Key loaded (' + process.env.GROQ_MODEL + ')' : '❌ GROQ_API_KEY not set!'}`);
 });
 
 module.exports = { app, io };

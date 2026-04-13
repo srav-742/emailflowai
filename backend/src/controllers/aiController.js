@@ -2,6 +2,7 @@ const prisma = require('../config/database');
 const { getMorningBrief } = require('../services/briefService');
 const { learnUserStyle } = require('../services/styleService');
 const { getAnalytics } = require('../services/analyticsService');
+const { summarizeBatchEmails } = require('../utils/xai');
 
 function normalizeImportantContacts(value) {
   const items = Array.isArray(value)
@@ -94,10 +95,61 @@ const listAccounts = async (req, res) => {
   }
 };
 
+const getInboxSummary = async (req, res) => {
+  try {
+    const limit  = Math.min(Number(req.query.limit) || 20, 50);
+    const emails = await prisma.email.findMany({
+      where:   { userId: req.user.id },
+      orderBy: { receivedAt: 'desc' },
+      take:    limit,
+      select: {
+        id:         true,
+        subject:    true,
+        sender:     true,
+        senderName: true,
+        snippet:    true,
+        summary:    true,
+        category:   true,
+        priority:   true,
+        receivedAt: true,
+      },
+    });
+
+    if (!emails.length) {
+      return res.json({
+        summary:     'No emails found. Sync your Gmail inbox to start seeing AI analysis here.',
+        emailCount:  0,
+        generatedAt: new Date().toISOString(),
+        emails:      [],
+      });
+    }
+
+    const summaryText = await summarizeBatchEmails(emails);
+
+    return res.json({
+      summary:     summaryText,
+      emailCount:  emails.length,
+      generatedAt: new Date().toISOString(),
+      emails:      emails.map((e) => ({
+        id:       e.id,
+        subject:  e.subject  || 'No Subject',
+        sender:   e.senderName || e.sender || 'Unknown',
+        category: e.category || 'general',
+        priority: e.priority || 'normal',
+        snippet:  e.summary  || e.snippet || '',
+      })),
+    });
+  } catch (error) {
+    console.error('Inbox summary error:', error);
+    return res.status(500).json({ error: 'Failed to generate inbox summary' });
+  }
+};
+
 module.exports = {
   morningBrief,
   trainStyle,
   getAnalyticsSummary,
   updatePreferences,
   listAccounts,
+  getInboxSummary,
 };

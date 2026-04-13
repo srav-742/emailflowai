@@ -1,45 +1,44 @@
+/**
+ * Task extractor — powered by Groq (llama-3.3-70b-versatile).
+ * Identical public API to the previous xAI version.
+ */
+
 const axios = require('axios');
 
-const XAI_API_URL = process.env.XAI_API_URL || 'https://api.x.ai/v1/chat/completions';
-const XAI_MODEL = process.env.XAI_MODEL || 'grok-4-fast-non-reasoning';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL   = process.env.GROQ_MODEL  || 'llama-3.3-70b-versatile';
+const GROQ_API_URL = process.env.GROQ_API_URL || 'https://api.groq.com/openai/v1/chat/completions';
 
 const PRIORITY_LEVELS = new Set(['low', 'medium', 'high']);
 const ACTIONABLE_PATTERN =
   /\b(please|can you|could you|kindly|need to|follow up|schedule|send|share|review|submit|prepare|update|reply|deadline|asap|urgent)\b/i;
 
-let xaiTaskCooldownUntil = 0;
-let xaiTaskCooldownReason = null;
+let taskCooldownUntil  = 0;
+let taskCooldownReason = null;
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function normalizeWhitespace(value = '') {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function truncateForPrompt(value = '', limit = 1800) {
+  const normalized = normalizeWhitespace(value);
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit).trim()}...`;
+}
 
 function cleanJsonBlock(value = '') {
   return value.replace(/```json/gi, '').replace(/```/g, '').trim();
 }
 
-function truncateForPrompt(value = '', limit = 1800) {
-  const normalized = normalizeWhitespace(value);
-  if (normalized.length <= limit) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, limit).trim()}...`;
-}
-
 function parseRetryAfterMs(message = '') {
-  const retryMatch = String(message).match(/try again in\s+((?:\d+(?:\.\d+)?h)?(?:\d+(?:\.\d+)?m)?(?:\d+(?:\.\d+)?s)?)/i);
-  if (!retryMatch?.[1]) {
-    return null;
-  }
-
-  const durationText = retryMatch[1];
-  const hourMatch = durationText.match(/(\d+(?:\.\d+)?)h/i);
-  const minuteMatch = durationText.match(/(\d+(?:\.\d+)?)m/i);
-  const secondMatch = durationText.match(/(\d+(?:\.\d+)?)s/i);
-
-  const hours = hourMatch ? Number.parseFloat(hourMatch[1]) : 0;
-  const minutes = minuteMatch ? Number.parseFloat(minuteMatch[1]) : 0;
-  const seconds = secondMatch ? Number.parseFloat(secondMatch[1]) : 0;
-  const totalMs = ((hours * 60 * 60) + (minutes * 60) + seconds) * 1000;
-
-  return Number.isFinite(totalMs) && totalMs > 0 ? totalMs : null;
+  const match = String(message).match(/try again in\s+((?:\d+(?:\.\d+)?h)?(?:\d+(?:\.\d+)?m)?(?:\d+(?:\.\d+)?s)?)/i);
+  if (!match?.[1]) return null;
+  const h = (match[1].match(/(\d+(?:\.\d+)?)h/i)?.[1] || 0);
+  const m = (match[1].match(/(\d+(?:\.\d+)?)m/i)?.[1] || 0);
+  const s = (match[1].match(/(\d+(?:\.\d+)?)s/i)?.[1] || 0);
+  const ms = ((+h * 3600) + (+m * 60) + +s) * 1000;
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
 function extractRateLimitMessage(error) {
@@ -51,65 +50,44 @@ function extractRateLimitMessage(error) {
   );
 }
 
-function isXAIRateLimitError(error) {
-  const code = String(error?.response?.data?.error?.code || error?.code || '').toLowerCase();
+function isGroqRateLimitError(error) {
+  const status  = Number(error?.response?.status || 0);
+  const code    = String(error?.response?.data?.error?.code || '').toLowerCase();
   const message = extractRateLimitMessage(error).toLowerCase();
-
-  return code === 'rate_limit_exceeded' || code === 'tokens' || message.includes('rate limit');
+  return status === 429 || code === 'rate_limit_exceeded' || message.includes('rate limit');
 }
 
-function isXAICreditsOrPermissionError(error) {
-  const code = String(error?.response?.data?.error?.code || error?.code || '').toLowerCase();
+function isGroqCreditsOrPermissionError(error) {
+  const status  = Number(error?.response?.status || 0);
+  const code    = String(error?.response?.data?.error?.code || '').toLowerCase();
   const message = extractRateLimitMessage(error).toLowerCase();
-
   return (
-    code === 'permission_denied' ||
-    code === 'insufficient_credits' ||
-    code === 'unauthorized' ||
-    message.includes('permission') ||
-    message.includes('credit') ||
-    message.includes('license') ||
-    message.includes('does not have permission')
+    status === 401 || status === 403 ||
+    code === 'permission_denied' || code === 'insufficient_credits' || code === 'unauthorized' ||
+    message.includes('permission') || message.includes('credit') || message.includes('license')
   );
 }
 
-function enterXAITaskCooldown(error) {
-  const message = extractRateLimitMessage(error);
-  const retryAfterMs = parseRetryAfterMs(message) || 15 * 60 * 1000;
-  xaiTaskCooldownUntil = Date.now() + retryAfterMs;
-  xaiTaskCooldownReason = message;
-
-  console.warn(
-    `xAI task extraction is cooling down until ${new Date(xaiTaskCooldownUntil).toLocaleTimeString()}. Falling back to local extraction.`,
-  );
+function enterTaskCooldown(error) {
+  const message       = extractRateLimitMessage(error);
+  const retryAfterMs  = parseRetryAfterMs(message) || 2 * 60 * 1000;
+  taskCooldownUntil   = Date.now() + retryAfterMs;
+  taskCooldownReason  = message;
+  console.warn(`[Groq/Tasks] Cooling down until ${new Date(taskCooldownUntil).toLocaleTimeString()}. Falling back to local extraction.`);
 }
 
-function isLikelyActionableEmail(email = {}) {
-  if (email.actionRequired || email.priority === 'high') {
-    return true;
-  }
-
-  const content = `${email.subject || ''} ${email.body || ''} ${email.snippet || ''}`;
-  return ACTIONABLE_PATTERN.test(content);
-}
+// ─── Task validation & deduplication ──────────────────────────────────────
 
 function sanitizeTask(task, index) {
-  if (!task || typeof task !== 'object') {
-    return null;
-  }
-
+  if (!task || typeof task !== 'object') return null;
   const label = typeof task.task === 'string' ? task.task.trim() : '';
-  if (!label) {
-    return null;
-  }
-
-  const deadline = typeof task.deadline === 'string' && task.deadline.trim() ? task.deadline.trim() : null;
+  if (!label) return null;
+  const deadline    = typeof task.deadline === 'string' && task.deadline.trim() ? task.deadline.trim() : null;
   const rawPriority = typeof task.priority === 'string' ? task.priority.trim().toLowerCase() : 'medium';
-  const priority = PRIORITY_LEVELS.has(rawPriority) ? rawPriority : 'medium';
-
+  const priority    = PRIORITY_LEVELS.has(rawPriority) ? rawPriority : 'medium';
   return {
-    id: typeof task.id === 'string' && task.id.trim() ? task.id.trim() : `task-${index + 1}`,
-    task: label,
+    id:        typeof task.id === 'string' && task.id.trim() ? task.id.trim() : `task-${index + 1}`,
+    task:      label,
     deadline,
     priority,
     completed: Boolean(task.completed),
@@ -117,76 +95,43 @@ function sanitizeTask(task, index) {
 }
 
 function dedupeTasks(tasks = []) {
-  const uniqueTasks = new Map();
-
+  const seen = new Map();
   tasks.forEach((task) => {
-    if (!task) {
-      return;
-    }
-
+    if (!task) return;
     const key = `${task.task.toLowerCase()}::${task.deadline || 'none'}`;
-    if (!uniqueTasks.has(key)) {
-      uniqueTasks.set(key, task);
-    }
+    if (!seen.has(key)) seen.set(key, task);
   });
-
-  return Array.from(uniqueTasks.values());
+  return Array.from(seen.values());
 }
 
 function parseTasksResponse(value = '') {
-  const cleaned = cleanJsonBlock(value);
-  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (!arrayMatch) {
-    return [];
-  }
-
+  const cleaned     = cleanJsonBlock(value);
+  const arrayMatch  = cleaned.match(/\[[\s\S]*\]/);
+  if (!arrayMatch) return [];
   try {
     const parsed = JSON.parse(arrayMatch[0]);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return dedupeTasks(
-      parsed
-        .map((task, index) => sanitizeTask(task, index))
-        .filter(Boolean),
-    );
+    if (!Array.isArray(parsed)) return [];
+    return dedupeTasks(parsed.map((t, i) => sanitizeTask(t, i)).filter(Boolean));
   } catch {
     return [];
   }
 }
 
-function normalizeWhitespace(value = '') {
-  return value.replace(/\s+/g, ' ').trim();
-}
+// ─── Local (rule-based) fallback ───────────────────────────────────────────
 
 function detectDeadline(sentence = '') {
   const match = sentence.match(
     /\b(?:by|before|on|due|tomorrow|today|tonight|this\s+\w+|next\s+\w+)\b[\w\s,/-]*/i,
   );
-
-  if (!match) {
-    return null;
-  }
-
+  if (!match) return null;
   return normalizeWhitespace(match[0].replace(/^(by|before|on|due)\s+/i, ''));
 }
 
 function detectPriority(sentence = '') {
-  const normalized = sentence.toLowerCase();
-
-  if (/\b(asap|urgent|immediately|right away|today|tonight)\b/.test(normalized)) {
-    return 'high';
-  }
-
-  if (/\b(by|before|due|deadline|friday|monday|tuesday|wednesday|thursday|saturday|sunday|tomorrow|next)\b/.test(normalized)) {
-    return 'high';
-  }
-
-  if (/\b(please|can you|could you|kindly|need to)\b/.test(normalized)) {
-    return 'medium';
-  }
-
+  const n = sentence.toLowerCase();
+  if (/\b(asap|urgent|immediately|right away|today|tonight)\b/.test(n)) return 'high';
+  if (/\b(by|before|due|deadline|friday|monday|tuesday|wednesday|thursday|saturday|sunday|tomorrow|next)\b/.test(n)) return 'high';
+  if (/\b(please|can you|could you|kindly|need to)\b/.test(n)) return 'medium';
   return 'low';
 }
 
@@ -201,65 +146,57 @@ function cleanTaskLabel(sentence = '') {
 
 function extractTasksFallback(email = {}) {
   const content = normalizeWhitespace(`${email.subject || ''}. ${email.body || ''}. ${email.snippet || ''}`);
-  if (!content) {
-    return [];
-  }
+  if (!content) return [];
 
   const sentences = content
     .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 
-  const actionable = sentences.filter((sentence) =>
-    /\b(please|can you|could you|kindly|need to|follow up|schedule|send|share|review|submit|prepare|update|reply)\b/i.test(
-      sentence,
-    ),
+  const actionable = sentences.filter((s) =>
+    /\b(please|can you|could you|kindly|need to|follow up|schedule|send|share|review|submit|prepare|update|reply)\b/i.test(s),
   );
 
-  const tasks = actionable.map((sentence, index) => {
-    const task = cleanTaskLabel(sentence);
-    if (!task) {
-      return null;
-    }
-
-    return {
-      id: `task-${index + 1}`,
-      task: task.charAt(0).toUpperCase() + task.slice(1),
-      deadline: detectDeadline(sentence),
-      priority: detectPriority(sentence),
-      completed: false,
-    };
-  });
-
-  return dedupeTasks(tasks.filter(Boolean));
+  return dedupeTasks(
+    actionable
+      .map((s, i) => {
+        const task = cleanTaskLabel(s);
+        if (!task) return null;
+        return {
+          id:        `task-${i + 1}`,
+          task:      task.charAt(0).toUpperCase() + task.slice(1),
+          deadline:  detectDeadline(s),
+          priority:  detectPriority(s),
+          completed: false,
+        };
+      })
+      .filter(Boolean),
+  );
 }
 
+function isLikelyActionableEmail(email = {}) {
+  if (email.actionRequired || email.priority === 'high') return true;
+  const content = `${email.subject || ''} ${email.body || ''} ${email.snippet || ''}`;
+  return ACTIONABLE_PATTERN.test(content);
+}
+
+// ─── Main AI-powered extraction ────────────────────────────────────────────
+
 async function extractTasksWithAI(email = {}) {
-  const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) {
-    return extractTasksFallback(email);
-  }
+  if (!GROQ_API_KEY)                       return extractTasksFallback(email);
+  if (!isLikelyActionableEmail(email))     return extractTasksFallback(email);
+  if (taskCooldownUntil > Date.now())      return extractTasksFallback(email);
 
-  if (!isLikelyActionableEmail(email)) {
-    return extractTasksFallback(email);
-  }
-
-  if (xaiTaskCooldownUntil > Date.now()) {
-    return extractTasksFallback(email);
-  }
-
-  if (xaiTaskCooldownUntil && xaiTaskCooldownUntil <= Date.now()) {
-    xaiTaskCooldownUntil = 0;
-    xaiTaskCooldownReason = null;
+  if (taskCooldownUntil && taskCooldownUntil <= Date.now()) {
+    taskCooldownUntil  = 0;
+    taskCooldownReason = null;
   }
 
   const prompt = [
     'Extract action items from this email.',
-    'Return only a JSON array.',
-    'Each item must have: id, task, deadline, priority, completed.',
-    'Priority must be one of: low, medium, high.',
-    'Use completed as false for newly detected tasks.',
-    'If no action item exists, return [].',
+    'Return ONLY a valid JSON array. No markdown, no commentary.',
+    'Each item must have: id (string), task (string), deadline (string|null), priority (low|medium|high), completed (false).',
+    'If no action items exist, return [].',
     '',
     `Subject: ${email.subject || 'No subject'}`,
     `From: ${email.sender || 'Unknown sender'}`,
@@ -268,23 +205,19 @@ async function extractTasksWithAI(email = {}) {
 
   try {
     const response = await axios.post(
-      XAI_API_URL,
+      GROQ_API_URL,
       {
-        model: XAI_MODEL,
+        model: GROQ_MODEL,
         messages: [
-          {
-            role: 'system',
-            content:
-              'You extract structured tasks from emails. Return valid JSON only with no commentary and no markdown.',
-          },
-          { role: 'user', content: prompt },
+          { role: 'system', content: 'You extract structured tasks from emails. Return ONLY valid JSON arrays. No markdown, no commentary.' },
+          { role: 'user',   content: prompt },
         ],
         temperature: 0.1,
-        max_tokens: 500,
+        max_tokens:  500,
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${GROQ_API_KEY}`,
           'Content-Type': 'application/json',
         },
         timeout: 25000,
@@ -292,15 +225,12 @@ async function extractTasksWithAI(email = {}) {
     );
 
     const content = response.data?.choices?.[0]?.message?.content ?? '';
-    const tasks = parseTasksResponse(content);
+    const tasks   = parseTasksResponse(content);
     return tasks.length ? tasks : extractTasksFallback(email);
   } catch (error) {
-    if (isXAIRateLimitError(error) || isXAICreditsOrPermissionError(error)) {
-      enterXAITaskCooldown(error);
-      return extractTasksFallback(email);
+    if (isGroqRateLimitError(error) || isGroqCreditsOrPermissionError(error)) {
+      enterTaskCooldown(error);
     }
-
-    // Fallback to local extraction on any error
     return extractTasksFallback(email);
   }
 }

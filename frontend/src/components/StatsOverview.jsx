@@ -8,43 +8,43 @@ const StatsOverview = ({ stats }) => {
   return (
     <div className="metrics-grid">
       <div className="metric-card">
-        <span className="eyebrow">Volume</span>
+        <span className="eyebrow">Step 1</span>
         <h3>Total emails</h3>
         <strong>{stats.totalEmails}</strong>
-        <p>Structured threads stored in your workspace.</p>
-        <div className="metric-footnote">Everything synced into one searchable control surface.</div>
+        <p>Messages stored in your workspace.</p>
+        <div className="metric-footnote">One place to review everything quickly.</div>
       </div>
 
       <div className="metric-card">
-        <span className="eyebrow">Attention</span>
+        <span className="eyebrow">Step 2</span>
         <h3>Unread</h3>
         <strong>{stats.unreadCount}</strong>
-        <p>Messages still waiting to be opened or handled.</p>
-        <div className="metric-footnote">{clearedRate}% of the current inbox has already been cleared.</div>
+        <p>Messages still waiting for review.</p>
+        <div className="metric-footnote">{clearedRate}% of the inbox is already cleared.</div>
       </div>
 
       <div className="metric-card">
-        <span className="eyebrow">Urgency</span>
+        <span className="eyebrow">Step 3</span>
         <h3>High priority</h3>
         <strong>{highPriority}</strong>
-        <p>Threads flagged as urgent or action-heavy.</p>
-        <div className="metric-footnote">Useful for deciding what deserves the first review pass.</div>
+        <p>Threads flagged as urgent or time-sensitive.</p>
+        <div className="metric-footnote">Start here when you want the fast shortlist.</div>
       </div>
 
       <div className="metric-card">
-        <span className="eyebrow">Tasks</span>
+        <span className="eyebrow">Step 4</span>
         <h3>Pending tasks</h3>
         <strong>{stats.pendingTaskCount || 0}</strong>
         <p>Action items extracted from email that are still open.</p>
-        <div className="metric-footnote">{stats.taskCount || 0} total tasks have been detected across your inbox.</div>
+        <div className="metric-footnote">{stats.taskCount || 0} total tasks detected so far.</div>
       </div>
 
       <div className="metric-card">
-        <span className="eyebrow">Follow-ups</span>
+        <span className="eyebrow">Step 5</span>
         <h3>Needs reply</h3>
         <strong>{followUpCount}</strong>
-        <p>Sent threads that have gone quiet long enough to deserve a nudge.</p>
-        <div className="metric-footnote">Follow-up automation helps prevent important threads from slipping.</div>
+        <p>Sent threads that need a follow-up.</p>
+        <div className="metric-footnote">Helpful for not missing important conversations.</div>
       </div>
     </div>
   );

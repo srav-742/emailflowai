@@ -5,6 +5,7 @@ const {
   getAnalyticsSummary,
   updatePreferences,
   listAccounts,
+  getInboxSummary,
 } = require('../controllers/aiController');
 const { authenticate } = require('../middleware/auth');
 
@@ -14,6 +15,7 @@ router.use(authenticate);
 
 router.get('/morning-brief', morningBrief);
 router.get('/analytics', getAnalyticsSummary);
+router.get('/inbox-summary', getInboxSummary);
 router.post('/style/train', trainStyle);
 router.post('/train-style', trainStyle);
 router.put('/preferences', updatePreferences);

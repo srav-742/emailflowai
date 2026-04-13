@@ -2,6 +2,7 @@ const prisma = require('../config/database');
 const { syncInbox } = require('./inboxSyncService');
 const { emitEmailNotifications } = require('./notificationService');
 const { detectFollowUps } = require('./followUpService');
+const { broadcastInboxSummary } = require('./inboxSummaryService');
 
 let interval = null;
 let followUpInterval = null;
@@ -40,6 +41,8 @@ async function pollInbox(io) {
         if (result.newEmails.length > 0) {
           console.log(`Live sync detected ${result.newEmails.length} new email(s) for user ${user.id}`);
           emitEmailNotifications(io, user, result.newEmails);
+          // Generate a single Groq AI summary for all new emails and push to dashboard
+          void broadcastInboxSummary(io, user, result.newEmails);
         }
       } catch (error) {
         console.error(`Polling error for user ${user.id}:`, error.message || error);

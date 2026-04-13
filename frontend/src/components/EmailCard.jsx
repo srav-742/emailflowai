@@ -73,6 +73,10 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
     }
   };
 
+  const showDetails = expanded || !compact;
+  const showControls = !compact || expanded;
+  const summaryText = email.summary || email.snippet || 'No summary available yet. Refresh summary to analyze this email.';
+
   return (
     <article className={`mail-card ${compact ? 'mail-card-compact' : ''}`} data-legacy-icon={getCategoryIcon(email.category)}>
       <div className="mail-card-top">
@@ -98,7 +102,17 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         </div>
       </div>
 
-      {email.summary && (
+      <div className="mail-summary mail-summary-card" style={{
+        background: 'rgba(47, 111, 228, 0.05)',
+        border: '1px solid rgba(47, 111, 228, 0.12)',
+        borderRadius: '12px',
+        padding: '0.85rem 1rem'
+      }}>
+        <span className="eyebrow">{email.priority === 'high' || email.actionRequired ? 'Priority insight' : 'AI takeaway'}</span>
+        <p style={{ color: 'var(--muted-strong)' }}>{summaryText}</p>
+      </div>
+
+      {false && email.summary && (
         <div className="mail-summary" style={{
           background: 'rgba(59, 130, 246, 0.05)',
           border: '1px solid rgba(59, 130, 246, 0.15)',
@@ -123,13 +137,13 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         {email.isSent && <span className="mail-label">sent</span>}
       </div>
 
-      {(expanded || !compact) && (
+      {showDetails && (
         <div className="mail-body-preview">
           <p>{email.body?.slice(0, compact ? 220 : 420) || email.snippet || 'No message body available.'}</p>
         </div>
       )}
 
-      {Array.isArray(email.tasks) && email.tasks.length > 0 && (
+      {showDetails && Array.isArray(email.tasks) && email.tasks.length > 0 && (
         <div className="mail-task-box">
           <div className="task-row-top">
             <strong>📋 Extracted tasks</strong>
@@ -155,7 +169,7 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         </div>
       )}
 
-      <div className="mail-actions">
+      {showControls ? <div className="mail-actions">
         <button className="button button-ghost" onClick={handleAISummarize} disabled={summarizing}>
           {summarizing ? '✨ Summarizing...' : '🤖 AI Summary'}
         </button>
@@ -168,9 +182,9 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         <button className="button button-secondary" onClick={() => setShowReply((value) => !value)}>
           {showReply ? '✖ Close' : '✍️ Reply'}
         </button>
-      </div>
+      </div> : null}
 
-      {showReply && <ReplyGenerator email={email} onClose={() => setShowReply(false)} onSent={onUpdate} />}
+      {showReply && showControls ? <ReplyGenerator email={email} onClose={() => setShowReply(false)} onSent={onUpdate} /> : null}
     </article>
   );
 

@@ -1,6 +1,7 @@
 const prisma = require('../config/database');
 const { getGmailClient } = require('../utils/gmailClient');
 const { analyzeEmailIntelligence } = require('../utils/classifier');
+const { classifyEmail: xaiClassify, summarizeEmail: xaiSummarize } = require('../utils/xai');
 const { extractTasksWithAI } = require('./taskExtractor');
 const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
 
@@ -70,6 +71,20 @@ async function getAuthenticatedUser(userId) {
 
 function sortEmailsByNewest(emails = []) {
   return [...emails].sort((left, right) => new Date(right.receivedAt || 0).getTime() - new Date(left.receivedAt || 0).getTime());
+}
+
+function normalizeStoredPriority(value = 'normal') {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized === 'medium') {
+    return 'normal';
+  }
+
+  if (['high', 'normal', 'low'].includes(normalized)) {
+    return normalized;
+  }
+
+  return 'normal';
 }
 
 function isRecoverableGmailError(error) {
@@ -166,16 +181,20 @@ function buildEmailPayload(message) {
   };
 }
 
+function buildAIEmailContent(payload = {}) {
+  return [
+    `Subject: ${payload.subject || 'No Subject'}`,
+    `From: ${payload.sender || 'Unknown sender'}`,
+    '',
+    String(payload.body || payload.snippet || '').trim(),
+  ].join('\n');
+}
+
 async function persistEmail(userId, payload, existingEmail) {
-  const baseData = {
+  const syncedFields = {
     subject: payload.subject,
     body: payload.body,
     snippet: payload.snippet,
-    summary: payload.summary,
-    priority: payload.priority,
-    category: payload.category,
-    labels: payload.labels,
-    actionRequired: payload.actionRequired,
     sender: payload.sender,
     senderName: payload.senderName,
     recipients: payload.recipients,
@@ -187,16 +206,51 @@ async function persistEmail(userId, payload, existingEmail) {
     receivedAt: payload.receivedAt,
   };
 
+  const aiContent = buildAIEmailContent(payload);
+
   if (existingEmail) {
+    const updateData = {
+      ...syncedFields,
+      summary: existingEmail.summary || payload.summary,
+      priority: existingEmail.priority || payload.priority,
+      category: existingEmail.category || payload.category,
+      labels: Array.isArray(existingEmail.labels) && existingEmail.labels.length ? existingEmail.labels : payload.labels,
+      actionRequired: typeof existingEmail.actionRequired === 'boolean' ? existingEmail.actionRequired : payload.actionRequired,
+    };
+
+    if (!Array.isArray(existingEmail.tasks) || existingEmail.tasks.length === 0) {
+      updateData.tasks = payload.isSent ? [] : await extractTasksWithAI(payload);
+    }
+
     const email = await prisma.email.update({
       where: { id: existingEmail.id },
-      data: baseData,
+      data: updateData,
     });
 
     return { email, isNew: false };
   }
 
-  const tasks = payload.isSent ? [] : await extractTasksWithAI(payload);
+  let tasks = [];
+  let summary = payload.summary;
+  let priority = payload.priority;
+  let category = payload.category;
+  let labels = payload.labels;
+  let actionRequired = payload.actionRequired;
+
+  if (!payload.isSent) {
+    const [classification, aiSummary, extractedTasks] = await Promise.all([
+      xaiClassify(aiContent),
+      xaiSummarize(aiContent, payload.subject || ''),
+      extractTasksWithAI(payload),
+    ]);
+
+    summary = aiSummary || payload.summary;
+    priority = normalizeStoredPriority(classification?.priority || payload.priority);
+    category = classification?.category || payload.category;
+    labels = Array.isArray(classification?.labels) && classification.labels.length ? classification.labels : payload.labels;
+    actionRequired = typeof classification?.actionRequired === 'boolean' ? classification.actionRequired : payload.actionRequired;
+    tasks = extractedTasks;
+  }
 
   try {
     const email = await prisma.email.create({
@@ -204,7 +258,12 @@ async function persistEmail(userId, payload, existingEmail) {
         userId,
         messageId: payload.messageId,
         tasks,
-        ...baseData,
+        ...syncedFields,
+        summary,
+        priority,
+        category,
+        labels,
+        actionRequired,
       },
     });
 
@@ -221,6 +280,12 @@ async function persistEmail(userId, payload, existingEmail) {
       },
       select: {
         id: true,
+        summary: true,
+        priority: true,
+        category: true,
+        labels: true,
+        actionRequired: true,
+        tasks: true,
       },
     });
 
@@ -230,7 +295,15 @@ async function persistEmail(userId, payload, existingEmail) {
 
     const email = await prisma.email.update({
       where: { id: matchingEmail.id },
-      data: baseData,
+      data: {
+        ...syncedFields,
+        summary,
+        priority,
+        category,
+        labels,
+        actionRequired,
+        tasks,
+      },
     });
 
     return { email, isNew: false };
@@ -261,6 +334,12 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
           select: {
             id: true,
             messageId: true,
+            summary: true,
+            priority: true,
+            category: true,
+            labels: true,
+            actionRequired: true,
+            tasks: true,
           },
         })
       : [];

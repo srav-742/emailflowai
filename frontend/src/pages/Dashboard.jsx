@@ -52,6 +52,8 @@ const Dashboard = () => {
   const [brief, setBrief] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [inboxSummary, setInboxSummary] = useState(null); // AI batch summary
+  const [loadingSummary, setLoadingSummary] = useState(false);
   const [liveSync, setLiveSync] = useState({
     connected: false,
     lastReceivedAt: null,
@@ -103,9 +105,23 @@ const Dashboard = () => {
     }
   }, []);
 
+  const fetchInboxSummary = useCallback(async () => {
+    try {
+      setLoadingSummary(true);
+      const response = await aiAPI.getInboxSummary(20);
+      setInboxSummary(response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch inbox summary:', error);
+      return null;
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, []);
+
   const refreshEmailInsights = useCallback(async () => {
-    await Promise.all([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics()]);
-  }, [fetchAnalytics, fetchEmails, fetchMorningBrief, fetchStats]);
+    await Promise.all([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), fetchInboxSummary()]);
+  }, [fetchAnalytics, fetchEmails, fetchMorningBrief, fetchStats, fetchInboxSummary]);
 
   const refreshWorkspace = useCallback(async () => {
     await Promise.all([refreshEmailInsights(), refreshProfile()]);
@@ -116,7 +132,7 @@ const Dashboard = () => {
 
     const loadDashboard = async () => {
       setLoading(true);
-      await Promise.allSettled([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
+      await Promise.allSettled([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), fetchInboxSummary(), refreshProfile()]);
 
       if (active) {
         setLoading(false);
@@ -128,7 +144,17 @@ const Dashboard = () => {
     return () => {
       active = false;
     };
-  }, [fetchAnalytics, fetchEmails, fetchMorningBrief, fetchStats, refreshProfile]);
+  }, [fetchAnalytics, fetchEmails, fetchInboxSummary, fetchMorningBrief, fetchStats, refreshProfile]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refreshWorkspace();
+    }, 20 * 60 * 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [refreshWorkspace]);
 
   useEffect(() => {
     if (!user?.id || !user?.hasGmailAccess) {
@@ -178,6 +204,12 @@ const Dashboard = () => {
       void Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
     };
 
+    const handleInboxSummary = (data) => {
+      if (data?.summary) {
+        setInboxSummary(data);
+      }
+    };
+
     const handleImportantEmail = (email) => {
       setNotice({
         tone: 'warn',
@@ -200,6 +232,7 @@ const Dashboard = () => {
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('new-emails', handleNewEmails);
+    socket.on('inbox-summary', handleInboxSummary);
     socket.on('important-email', handleImportantEmail);
     socket.on('follow-up-ready', handleFollowUpReady);
 
@@ -211,6 +244,7 @@ const Dashboard = () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('new-emails', handleNewEmails);
+      socket.off('inbox-summary', handleInboxSummary);
       socket.off('important-email', handleImportantEmail);
       socket.off('follow-up-ready', handleFollowUpReady);
       disconnectSocket();
@@ -331,11 +365,11 @@ const Dashboard = () => {
     <div className="dashboard-shell">
       <section className="hero-card hero-card-dashboard">
         <div className="hero-copy">
-          <span className="eyebrow">Today at a glance</span>
-          <h2>{user?.hasGmailAccess ? 'Your inbox is connected and ready for calm, high-signal triage.' : 'Connect Gmail to unlock live inbox intelligence.'}</h2>
+          <span className="eyebrow">Step 1 · Understand today</span>
+          <h2>{user?.hasGmailAccess ? 'Your inbox is organized into clear steps so the next action is easy to spot.' : 'Connect Gmail to unlock automatic inbox analysis and guided triage.'}</h2>
           <p>
-            EmailFlow groups your work into actionable queues, highlights high-priority threads, and keeps drafts and
-            summaries close to the inbox.
+            EmailFlow brings summaries, urgency, follow-ups, tasks, and reply drafts into one calm workspace so users can
+            understand each email faster.
           </p>
         </div>
 
@@ -371,10 +405,65 @@ const Dashboard = () => {
         </div>
       </section>
 
+      <section className="surface-card live-sync-card" style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(168,85,247,0.15) 100%)', border: '1px solid rgba(168,85,247,0.3)' }}>
+        <div>
+          <span className="eyebrow" style={{ color: '#a78bfa' }}>🤖 AI Inbox Intelligence · Powered by Groq</span>
+          <h3 style={{ color: '#e2e8f0', marginBottom: '0.75rem' }}>
+            {loadingSummary ? 'Analyzing your inbox with AI...' : inboxSummary?.summary ? 'Your inbox at a glance' : 'AI summary will appear after your first email sync'}
+          </h3>
+          {loadingSummary ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#94a3b8' }}>
+              <div className="app-loading-spinner" style={{ width: '1.2rem', height: '1.2rem', borderWidth: '2px' }}></div>
+              <span>Groq is reading your latest {emails.length} email{emails.length !== 1 ? 's' : ''}...</span>
+            </div>
+          ) : inboxSummary?.summary ? (
+            <>
+              <p style={{ color: '#cbd5e1', lineHeight: 1.7, marginBottom: '1rem', fontSize: '0.97rem' }}>
+                {inboxSummary.summary}
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                <span className="status-pill status-ok">📊 {inboxSummary.emailCount || emails.length} emails analyzed</span>
+                {inboxSummary.generatedAt && (
+                  <span className="status-pill">🕒 {new Date(inboxSummary.generatedAt).toLocaleTimeString([], { timeStyle: 'short' })}</span>
+                )}
+                {inboxSummary.emails && inboxSummary.emails.some(e => e.priority === 'high') && (
+                  <span className="status-pill status-warn">🔴 Urgent emails detected</span>
+                )}
+              </div>
+              {Array.isArray(inboxSummary.emails) && inboxSummary.emails.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  {inboxSummary.emails.slice(0, 5).map((e) => (
+                    <div key={e.id} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', padding: '0.5rem 0.75rem', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
+                      <span className={`mail-pill ${e.priority === 'high' ? 'high' : e.priority === 'low' ? 'low' : 'normal'}`} style={{ flexShrink: 0, marginTop: '0.1rem' }}>{e.priority || 'normal'}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.subject || 'No Subject'}</div>
+                        <div style={{ color: '#94a3b8', fontSize: '0.78rem' }}>from {e.sender} · {e.category}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <p style={{ color: '#64748b' }}>Sync your Gmail to generate an AI summary of all your latest emails at once.</p>
+          )}
+        </div>
+        <div className="live-sync-strip" style={{ marginTop: '1rem' }}>
+          <button
+            className="button button-secondary"
+            onClick={fetchInboxSummary}
+            disabled={loadingSummary || !emails.length}
+            style={{ fontSize: '0.82rem', padding: '0.45rem 1rem' }}
+          >
+            {loadingSummary ? 'Analyzing...' : '🔄 Refresh AI Summary'}
+          </button>
+        </div>
+      </section>
+
       <section className="surface-card live-sync-card">
         <div>
-          <span className="eyebrow">Realtime inbox</span>
-          <h3>{user?.hasGmailAccess ? 'Live email sync is wired into your dashboard.' : 'Connect Gmail to turn on realtime inbox updates.'}</h3>
+          <span className="eyebrow">Step 2 · Keep inbox current</span>
+          <h3>{user?.hasGmailAccess ? 'Live sync keeps this workspace updated automatically.' : 'Connect Gmail to turn on realtime inbox updates.'}</h3>
           <p>
             {liveSync.newCount > 0
               ? `${liveSync.newCount} new email${liveSync.newCount > 1 ? 's were' : ' was'} added automatically and task extraction ran during sync.`
@@ -393,7 +482,7 @@ const Dashboard = () => {
       {notice?.text ? (
         <section className="surface-card banner-card">
           <div>
-            <span className="eyebrow">Workspace update</span>
+            <span className="eyebrow">Step 2 · Workspace update</span>
             <h3>{notice.tone === 'warn' ? 'Attention needed' : 'Everything is flowing'}</h3>
             <p>{notice.text}</p>
           </div>

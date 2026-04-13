@@ -13,11 +13,18 @@ export default defineConfig({
       '/api': {
         target: apiTarget,
         changeOrigin: true,
+        secure: false,
+      },
+      '/auth': {
+        target: apiTarget,
+        changeOrigin: true,
+        secure: false,
       },
       '/socket.io': {
         target: apiTarget,
         changeOrigin: true,
         ws: true,
+        secure: false,
       },
     },
   },

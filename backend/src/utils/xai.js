@@ -218,7 +218,15 @@ const summarizeEmail = async (emailContent, subject = '') => {
       [
         {
           role: 'system',
-          content: 'You summarize emails for busy professionals. Provide a concise, high-signal summary in 2–3 sentences. Focus on the core message, any specific requests, and upcoming deadlines.',
+          content: `You are an expert executive assistant. Your goal is to provide a "perfect" summary that allows the user to understand the entire context and implications of an email without reading the original text.
+          
+STRUCTURE YOUR SUMMARY AS FOLLOWS:
+1. THE CORE MESSAGE: What is this email about? (1 sentence)
+2. KEY DETAILS: What are the most important facts, numbers, or decisions mentioned?
+3. ACTION ITEMS: What does the sender expect from the user? Or what is the next step?
+4. DEADLINES: Are there any specific dates or times mentioned?
+
+Keep the total length between 2-4 sentences. Be direct, clear, and high-signal.`,
         },
         {
           role: 'user',
@@ -248,16 +256,31 @@ const classifyEmail = async (emailContent) => {
         },
         {
           role: 'user',
-          content: `Classify this email.
+          content: `Classify this email into the most appropriate category based on its intent.
 
-Categories: finance, developer, meetings, clients, operations, legal, hr, travel, newsletter, social, general.
-Priority: high (urgent / time-sensitive), normal (standard), low (informational).
+CATEGORIES & DEFINITIONS:
+- finance: Invoices, receipts, bank statements, payments, tax, salary.
+- developer: GitHub/GitLab, deployments, API keys, bug reports, server logs, tech updates.
+- meetings: Calendar invites, scheduling, agendas, Zoom/Teams links.
+- clients: Proposals, contracts, customer support, sales inquiries.
+- operations: Workflow updates, internal reports, maintenance, approvals.
+- legal: NDAs, terms of service, privacy policies, compliance.
+- hr: Hiring, interviews, benefits, payroll, leave requests.
+- travel: Flight/hotel bookings, itineraries, rental cars.
+- newsletter: Marketing, blog updates, weekly digests, promotions.
+- social: LinkedIn, Twitter/X, community forums, friend requests.
+- general: Personal notes, miscellaneous, or anything that doesn't fit above.
+
+PRIORITY DEFINITIONS:
+- high: Urgent requests, production outages, same-day deadlines.
+- normal: Standard business communication, replies needed in 1-2 days.
+- low: Informational, FYI, newsletters, non-urgent updates.
 
 Return ONLY this JSON:
 {
   "category": "category_name",
   "priority": "high | normal | low",
-  "labels": ["label1", "label2"],
+  "labels": ["Short", "Descriptive", "Tags"],
   "actionRequired": true|false
 }
 

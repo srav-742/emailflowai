@@ -254,26 +254,35 @@ function generateSummary(subject = '', snippet = '', body = '') {
   const normalizedSubject = normalizeWhitespace(subject);
   const primaryText = stripQuotedContent(body || snippet || '');
   const sentences = splitSentences(primaryText);
+  
+  // Extract key elements
   const leadSentence = cleanSentence(sentences[0] || snippet || normalizedSubject);
   const actionSentence = cleanSentence(extractActionSentence(sentences));
   const deadline = extractDeadline(`${normalizedSubject} ${primaryText}`);
+  
   const parts = [];
-
+  
+  // 1. Core Message
   if (leadSentence) {
-    parts.push(summarizeText(leadSentence, 150));
+    parts.push(`Topic: ${summarizeText(leadSentence, 150)}`);
   } else if (normalizedSubject) {
-    parts.push(summarizeText(normalizedSubject, 150));
+    parts.push(`Topic: ${summarizeText(normalizedSubject, 150)}`);
   }
-
+  
+  // 2. Action Required
   if (actionSentence && !parts.join(' ').toLowerCase().includes(actionSentence.toLowerCase())) {
-    parts.push(`Action: ${summarizeText(actionSentence, 110)}`);
+    parts.push(`Action Required: ${summarizeText(actionSentence, 110)}`);
+  } else if (REQUEST_PATTERN.test(primaryText)) {
+     // If we couldn't find a clean sentence but there's a request pattern
+     parts.push(`Action Required: Yes (review for details)`);
   }
-
-  if (deadline && !parts.join(' ').toLowerCase().includes(deadline.toLowerCase())) {
+  
+  // 3. Deadline
+  if (deadline) {
     parts.push(`Deadline: ${deadline}`);
   }
 
-  return parts.filter(Boolean).join('. ') || 'No content available';
+  return parts.filter(Boolean).join(' | ') || 'No content available';
 }
 
 function analyzeEmailIntelligence({ subject = '', body = '', snippet = '', sender = '', labelIds = [] }) {

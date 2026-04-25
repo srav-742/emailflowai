@@ -1,5 +1,6 @@
 const prisma = require('../config/database');
 const { analyzeWritingStyle } = require('../utils/xai');
+const StyleExtractor = require('./StyleExtractor');
 
 const STYLE_MIN_SAMPLES = Number(process.env.STYLE_MIN_SAMPLES || 5);
 const STYLE_MAX_SAMPLES = Number(process.env.STYLE_MAX_SAMPLES || 20);
@@ -45,10 +46,27 @@ function buildStyleSamples(emails = []) {
 }
 
 async function learnUserStyle(userId) {
-  const sentEmails = await getStyleTrainingEmails(userId);
-  const sampleCount = sentEmails.length;
+  let profile;
 
-  if (sampleCount < STYLE_MIN_SAMPLES) {
+  try {
+    profile = await StyleExtractor.extractProfile(userId);
+  } catch (error) {
+    console.error('[StyleService] Deep profile extraction failed, falling back to sent-email analysis:', error.message || error);
+
+    const sentEmails = await getStyleTrainingEmails(userId);
+    const samples = buildStyleSamples(sentEmails);
+    const fallbackProfile = await analyzeWritingStyle(samples);
+
+    profile = {
+      ...fallbackProfile,
+      ready: sentEmails.length >= STYLE_MIN_SAMPLES,
+      sampleCount: sentEmails.length,
+      minSamples: STYLE_MIN_SAMPLES,
+      lastExtraction: new Date().toISOString(),
+    };
+  }
+
+  if (!profile.ready) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { style: true },
@@ -57,34 +75,19 @@ async function learnUserStyle(userId) {
     return {
       ready: false,
       style: user?.style || null,
-      sampleCount,
-      minSamples: STYLE_MIN_SAMPLES,
-      remainingSamples: STYLE_MIN_SAMPLES - sampleCount,
-      message: `Add ${STYLE_MIN_SAMPLES - sampleCount} more sent email${STYLE_MIN_SAMPLES - sampleCount === 1 ? '' : 's'} to train your writing style.`,
+      message: 'Still learning your style. Keep sending and editing replies!',
     };
   }
 
-  const style = {
-    ...(await analyzeWritingStyle(buildStyleSamples(sentEmails))),
-    ready: true,
-    minSamples: STYLE_MIN_SAMPLES,
-    sampleCount,
-    editedSampleCount: sentEmails.filter((email) => email.isEditedReply).length,
-    updatedAt: new Date().toISOString(),
-  };
-
   const user = await prisma.user.update({
     where: { id: userId },
-    data: { style },
+    data: { style: profile },
   });
 
   return {
     ready: true,
     style: user.style,
-    sampleCount,
-    minSamples: STYLE_MIN_SAMPLES,
-    remainingSamples: 0,
-    message: 'Style profile updated successfully.',
+    message: 'Style profile refined with deep analysis.',
   };
 }
 

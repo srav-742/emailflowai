@@ -10,6 +10,10 @@ const shellNavItems = [
   { path: '/meetings', label: 'Meetings', kicker: 'Calendar and agenda' },
   { path: '/newsletter', label: 'Newsletters', kicker: 'Read later' },
   { path: '/social', label: 'Social', kicker: 'Community updates' },
+  { path: '/focus', label: 'Focus Today', kicker: 'Immediate action' },
+  { path: '/read-later', label: 'Read Later', kicker: 'When you have time' },
+  { path: '/newsletters', label: 'Newsletters', kicker: 'Favorite publications' },
+  { path: '/waiting', label: 'Waiting for Reply', kicker: 'Expectations' },
 ];
 
 const pageTitles = {
@@ -20,6 +24,10 @@ const pageTitles = {
   '/meetings': 'Meetings and calendar',
   '/newsletter': 'Newsletters and promos',
   '/social': 'Social and community',
+  '/focus': 'Focus Today',
+  '/read-later': 'Read Later',
+  '/newsletters': 'Newsletters',
+  '/waiting': 'Waiting for Reply',
 };
 
 const pageDescriptions = {
@@ -30,6 +38,10 @@ const pageDescriptions = {
   '/meetings': 'Schedules, invites, agendas, and follow-up threads with less clutter.',
   '/newsletter': 'A calm read-later stack for promos, product updates, and newsletters.',
   '/social': 'Community notifications and lower-priority social traffic in one place.',
+  '/focus': 'High-priority emails identified by AI as needing immediate focus.',
+  '/read-later': 'A collection of interesting content and threads you saved for later.',
+  '/newsletters': 'Cleaned and separated newsletter feeds to reduce inbox noise.',
+  '/waiting': 'Threads where you sent a message and are still waiting for a response.',
 };
 
 const Layout = () => {
@@ -39,17 +51,6 @@ const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const currentTitle = pageTitles[location.pathname] || 'EmailFlow AI';
   const currentDescription = pageDescriptions[location.pathname] || 'Run your inbox like a focused operations desk.';
-  const lastSyncLabel = user?.lastSyncAt
-    ? new Date(user.lastSyncAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-    : 'No sync yet';
-
-  const navItems = [
-    { path: '/dashboard', icon: '🏠', label: 'Dashboard' },
-    { path: '/emails', icon: '📧', label: 'All Emails' },
-    { path: '/important', icon: '⭐', label: 'Important' },
-    { path: '/promotions', icon: '🎁', label: 'Promotions' },
-    { path: '/social', icon: '👥', label: 'Social' },
-  ];
 
   const handleLogout = async () => {
     await logout();
@@ -57,7 +58,7 @@ const Layout = () => {
   };
 
   return (
-    <div className="app-shell" data-legacy-count={navItems.length}>
+    <div className="app-shell" data-legacy-count={shellNavItems.length}>
       <aside className={`app-sidebar ${sidebarOpen ? 'expanded' : 'collapsed'}`}>
         <div className="brand-lockup">
           <button className="brand-badge" onClick={() => navigate('/dashboard')}>
@@ -100,29 +101,32 @@ const Layout = () => {
 
         <div className="sidebar-footer-card">
           <div className="user-chip">
-            <span className="user-avatar">{(user?.name || user?.email || 'U').slice(0, 1).toUpperCase()}</span>
+            <span className="user-avatar" style={{ background: user?.hasGmailAccess ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, var(--accent), var(--cyan))' }}>
+              {(user?.name || user?.email || 'U').slice(0, 1).toUpperCase()}
+            </span>
             {sidebarOpen && (
               <div>
                 <strong>{user?.name || 'Workspace owner'}</strong>
-                <span>{user?.email}</span>
+                <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{user?.email}</span>
               </div>
             )}
           </div>
 
           {sidebarOpen && (
-            <div className="status-stack">
-              <span className={`status-pill ${user?.hasGmailAccess ? 'status-ok' : 'status-warn'}`}>
-                {user?.hasGmailAccess ? 'Gmail connected' : 'Gmail needs approval'}
-              </span>
+            <div className="status-stack" style={{ marginTop: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.75rem', borderRadius: '10px', background: user?.hasGmailAccess ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)', border: '1px solid currentColor', color: user?.hasGmailAccess ? '#34d399' : '#fbbf24', fontSize: '0.75rem', fontWeight: 600 }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor', boxShadow: '0 0 8px currentColor' }}></span>
+                {user?.hasGmailAccess ? 'GMAIL CONNECTED' : 'GMAIL DISCONNECTED'}
+              </div>
             </div>
           )}
 
-          <div className="button-row">
-            <button className="button button-ghost" onClick={() => setSidebarOpen((value) => !value)}>
-              {sidebarOpen ? 'Collapse' : 'Expand'}
+          <div className="button-row" style={{ marginTop: '1rem' }}>
+            <button className="button button-ghost" style={{ flex: 1, padding: '0.6rem' }} onClick={() => setSidebarOpen((value) => !value)}>
+              {sidebarOpen ? 'Collapse' : '->'}
             </button>
             {sidebarOpen && (
-              <button className="button button-secondary" onClick={handleLogout}>
+              <button className="button button-logout" style={{ flex: 2, padding: '0.6rem' }} onClick={handleLogout}>
                 Logout
               </button>
             )}
@@ -139,12 +143,13 @@ const Layout = () => {
           </div>
 
           <div className="header-actions">
-            <span className={`status-pill ${user?.hasGmailAccess ? 'status-ok' : 'status-warn'}`}>
-              {user?.hasGmailAccess ? 'Gmail connected' : 'Gmail needs approval'}
-            </span>
-            <span className="status-pill">Last sync {lastSyncLabel}</span>
-            <button className="button button-ghost" onClick={() => navigate('/auth/gmail-connect')}>
-              {user?.hasGmailAccess ? 'Manage Gmail' : 'Connect Gmail'}
+            {!user?.hasGmailAccess && (
+              <button className="button button-primary" onClick={() => navigate('/auth/gmail-connect')}>
+                Connect Gmail
+              </button>
+            )}
+            <button className="button button-logout" onClick={handleLogout}>
+              Logout
             </button>
           </div>
         </header>
@@ -155,65 +160,6 @@ const Layout = () => {
       </main>
     </div>
   );
-
-  /*
-  return (
-    <div className="layout">
-      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
-        <div className="sidebar-header">
-          <span className="sidebar-logo">📧</span>
-          {sidebarOpen && <h2>Email AI</h2>}
-        </div>
-
-        <nav className="sidebar-nav">
-          {navItems.map(item => (
-            <button
-              key={item.path}
-              className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
-              onClick={() => navigate(item.path)}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              {sidebarOpen && <span className="nav-label">{item.label}</span>}
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="user-info">
-            <div className="user-avatar">{user?.name?.charAt(0) || user?.email?.charAt(0)}</div>
-            {sidebarOpen && (
-              <div className="user-details">
-                <p className="user-name">{user?.name || 'User'}</p>
-                <p className="user-email">{user?.email}</p>
-              </div>
-            )}
-          </div>
-          <button className="logout-btn" onClick={handleLogout}>
-            {sidebarOpen ? 'Logout' : '🚪'}
-          </button>
-        </div>
-      </aside>
-
-      <main className="main-content">
-        <header className="top-header">
-          <button 
-            className="sidebar-toggle"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-          >
-            ☰
-          </button>
-          <h1 className="page-title">
-            {navItems.find(item => item.path === location.pathname)?.label || 'Dashboard'}
-          </h1>
-        </header>
-
-        <div className="content">
-          <Outlet />
-        </div>
-      </main>
-    </div>
-  );
-  */
 };
 
 export default Layout;

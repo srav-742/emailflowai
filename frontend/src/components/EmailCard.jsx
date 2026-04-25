@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { emailAPI } from '../services/api';
 import ReplyGenerator from './ReplyGenerator';
 
-const EmailCard = ({ email, onUpdate, compact = false }) => {
+const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isThreadHead = false, isThreaded = false }) => {
   const [expanded, setExpanded] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [classifying, setClassifying] = useState(false);
@@ -74,11 +74,11 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
   };
 
   const showDetails = expanded || !compact;
-  const showControls = !compact || expanded;
+  const showControls = (!compact || expanded) && !isThreaded;
   const summaryText = email.summary || email.snippet || 'No summary available yet. Refresh summary to analyze this email.';
 
   return (
-    <article className={`mail-card ${compact ? 'mail-card-compact' : ''}`} data-legacy-icon={getCategoryIcon(email.category)}>
+    <article className={`mail-card ${compact ? 'mail-card-compact' : ''} ${isThreaded ? 'mail-card-threaded' : ''}`} data-legacy-icon={getCategoryIcon(email.category)}>
       <div className="mail-card-top">
         <button className="mail-card-header" onClick={() => setExpanded((value) => !value)}>
           <span className="mail-avatar" style={{ background: email.priority === 'high' ? 'linear-gradient(135deg, #ef4444, #f97316)' : 'linear-gradient(135deg, var(--highlight), var(--accent))' }}>
@@ -91,6 +91,11 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         </button>
 
         <div className="mail-card-side">
+          {isThreadHead && onThreadClick && (
+            <button className="button button-ghost thread-bubble" onClick={(e) => { e.stopPropagation(); onThreadClick(); }}>
+              💬 View thread
+            </button>
+          )}
           <span className="mail-pill" style={{
             color: getPriorityColor(email.priority),
             borderColor: `${getPriorityColor(email.priority)}40`,
@@ -111,17 +116,6 @@ const EmailCard = ({ email, onUpdate, compact = false }) => {
         <span className="eyebrow">{email.priority === 'high' || email.actionRequired ? 'Priority insight' : 'AI takeaway'}</span>
         <p style={{ color: 'var(--muted-strong)' }}>{summaryText}</p>
       </div>
-
-      {false && email.summary && (
-        <div className="mail-summary" style={{
-          background: 'rgba(59, 130, 246, 0.05)',
-          border: '1px solid rgba(59, 130, 246, 0.15)',
-          borderRadius: '12px',
-          padding: '0.85rem 1rem'
-        }}>
-          <p style={{ color: 'var(--muted-strong)' }}>{email.summary}</p>
-        </div>
-      )}
 
       <div className="mail-label-row">
         <span className="mail-category" style={{ borderColor: getPriorityColor(email.priority) }}>

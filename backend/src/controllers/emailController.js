@@ -7,8 +7,20 @@ const { trackAIAction } = require('../services/analyticsService');
 const { getOrCreateStyleProfile, refreshStyleProfileIfReady } = require('../services/styleService');
 const { emitEmailNotifications } = require('../services/notificationService');
 const { detectFollowUps } = require('../services/followUpService');
-const { getGmailClient } = require('../utils/gmailClient');
+const { getAuthenticatedGmailClient } = require('../services/tokenService');
 const { getUserSocketRoom } = require('../utils/socketRooms');
+const StyleExtractor = require('../services/StyleExtractor');
+
+function parseCsvList(value) {
+  if (!value) {
+    return [];
+  }
+
+  return String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 function buildEmailContent(email) {
   const content = `${email.body || email.snippet || ''}`.replace(/\s+/g, ' ').trim();
@@ -79,11 +91,18 @@ const fetchEmails = async (req, res) => {
 
 const getEmails = async (req, res) => {
   try {
-    const { category, priority, page = 1, limit = 20, q } = req.query;
+    const { category, categoryIn, priority, followUp, isRead, actionRequired, labels, page = 1, limit = 20, q } = req.query;
+    const categories = parseCsvList(categoryIn);
+    const labelList = parseCsvList(labels);
     const where = {
       userId: req.user.id,
       ...(category ? { category: String(category) } : {}),
+      ...(categories.length ? { category: { in: categories } } : {}),
       ...(priority ? { priority: String(priority) } : {}),
+      ...(followUp !== undefined ? { followUp: followUp === 'true' } : {}),
+      ...(isRead !== undefined ? { isRead: isRead === 'true' } : {}),
+      ...(actionRequired !== undefined ? { actionRequired: actionRequired === 'true' } : {}),
+      ...(labelList.length ? { labels: { hasSome: labelList } } : {}),
       ...(q
         ? {
             OR: [
@@ -116,6 +135,83 @@ const getEmails = async (req, res) => {
   } catch (error) {
     console.error('Get emails error:', error);
     res.status(500).json({ error: 'Failed to get emails' });
+  }
+};
+
+const getThreads = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+
+    // To get threads, we find the latest message for each threadId
+    // and return those as the "representative" of the thread.
+    const threads = await prisma.email.groupBy({
+      by: ['threadId'],
+      where: { userId: req.user.id },
+      _max: {
+        receivedAt: true,
+      },
+      orderBy: {
+        _max: {
+          receivedAt: 'desc',
+        },
+      },
+      skip: (Number(page) - 1) * Number(limit),
+      take: Number(limit),
+    });
+
+    // Now fetch the actual email details for these latest messages
+    const threadedEmails = await Promise.all(
+      threads.map(async (t) => {
+        return prisma.email.findFirst({
+          where: {
+            userId: req.user.id,
+            threadId: t.threadId,
+            receivedAt: t._max.receivedAt,
+          },
+        });
+      })
+    );
+
+    const totalThreads = await prisma.email.groupBy({
+      by: ['threadId'],
+      where: { userId: req.user.id },
+    });
+
+    res.json({
+      threads: threadedEmails.filter(Boolean),
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total: totalThreads.length,
+        pages: Math.ceil(totalThreads.length / Number(limit)),
+      },
+    });
+  } catch (error) {
+    console.error('Get threads error:', error);
+    res.status(500).json({ error: 'Failed to get threaded view' });
+  }
+};
+
+const getThreadById = async (req, res) => {
+  try {
+    const { threadId } = req.params;
+
+    const emails = await prisma.email.findMany({
+      where: {
+        userId: req.user.id,
+        threadId,
+      },
+      orderBy: { receivedAt: 'asc' },
+    });
+
+    if (!emails.length) {
+      return res.status(404).json({ error: 'Thread not found' });
+    }
+
+    res.json({ threadId, emails });
+  } catch (error) {
+    console.error('Get thread error:', error);
+    res.status(500).json({ error: 'Failed to get thread details' });
   }
 };
 
@@ -211,6 +307,60 @@ const summarizeEmail = async (req, res) => {
   } catch (error) {
     console.error('Summarize email error:', error);
     res.status(500).json({ error: 'Failed to summarize email' });
+  }
+};
+
+const searchEmails = async (req, res) => {
+  try {
+    const { q, page = 1, limit = 20 } = req.query;
+
+    if (!q) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+
+    const offset = (Number(page) - 1) * Number(limit);
+    const searchTerm = String(q).trim().split(/\s+/).join(' & '); // Format for websearch_to_tsquery or plain to_tsquery
+
+    // We use raw SQL to leverage PostgreSQL's tsvector and ranking capabilities
+    // This allows searching across subject and body with relevancy ranking.
+    const emails = await prisma.$queryRaw`
+      SELECT * FROM "Email"
+      WHERE "userId" = ${req.user.id}
+      AND (
+        to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(body, '')) 
+        @@ websearch_to_tsquery('english', ${q})
+      )
+      ORDER BY ts_rank(
+        to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(body, '')), 
+        websearch_to_tsquery('english', ${q})
+      ) DESC
+      LIMIT ${Number(limit)} OFFSET ${offset}
+    `;
+
+    // Count total matches for pagination
+    const countResult = await prisma.$queryRaw`
+      SELECT count(*)::int as count FROM "Email"
+      WHERE "userId" = ${req.user.id}
+      AND (
+        to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(body, '')) 
+        @@ websearch_to_tsquery('english', ${q})
+      )
+    `;
+
+    const total = countResult[0]?.count || 0;
+
+    res.json({
+      emails,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit)),
+      },
+    });
+  } catch (error) {
+    console.error('Search emails error:', error);
+    res.status(500).json({ error: 'Search service temporarily unavailable' });
   }
 };
 
@@ -491,7 +641,7 @@ const sendReply = async (req, res) => {
       return res.status(404).json({ error: 'Email not found' });
     }
 
-    const gmail = getGmailClient(user.accessToken, user.refreshToken);
+    const gmail = await getAuthenticatedGmailClient(req.user.id);
     const raw = buildReplyRawMessage({
       to: email.sender || user.email,
       subject: email.subject || 'Your message',
@@ -577,6 +727,12 @@ const sendReply = async (req, res) => {
     void refreshStyleProfileIfReady(req.user.id).catch((styleError) => {
       console.error('Style auto-refresh error:', styleError.message || styleError);
     });
+
+    if (userEditedReply) {
+      void StyleExtractor.logDraftEdit(req.user.id, email.id, generatedReply, body, tone).catch(err => {
+        console.error('Failed to log AI training data:', err);
+      });
+    }
 
     res.json({
       message: 'Reply sent successfully',
@@ -674,4 +830,7 @@ module.exports = {
   aiGenerateReply,
   sendReply,
   aiProcessAll,
+  getThreads,
+  getThreadById,
+  searchEmails,
 };

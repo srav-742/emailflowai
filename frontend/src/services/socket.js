@@ -20,9 +20,8 @@ function getSocketUrl() {
     return new URL(apiUrl).origin;
   }
 
-  // Dev mode: VITE_API_URL is /api (relative), so Vite itself proxies /socket.io
-  // Connect to the Vite dev server; the proxy handles forwarding to :5050
-  return window.location.origin;
+  // Connect directly to backend to avoid Vite proxy issues with WebSockets
+  return 'http://localhost:5050';
 }
 
 export function connectSocket(userId) {
@@ -46,8 +45,8 @@ export function connectSocket(userId) {
   socket = io(getSocketUrl(), {
     auth: { token },
     path: import.meta.env.VITE_SOCKET_PATH || '/socket.io',
-    // Use websocket first (proxied by Vite ws: true), fall back to polling
-    transports: ['websocket', 'polling'],
+    // Start with polling so Socket.IO can upgrade cleanly without noisy failed websocket handshakes.
+    transports: ['polling', 'websocket'],
     withCredentials: true,
     reconnection: true,
     reconnectionDelay: 2000,

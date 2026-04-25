@@ -1,18 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import { emailAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useEmailStore } from '../store/emailStore';
+import { useSSE } from '../hooks/useSSE';
 import EmailCard from '../components/EmailCard';
-import { connectSocket, disconnectSocket } from '../services/socket';
+import ThreadView from '../components/ThreadView';
+import { connectSocket } from '../services/socket';
 import './EmailList.css';
 
 const EmailList = ({ filter = {}, title = 'Inbox command center', description = 'Review and process every thread in one place.' }) => {
-  const { user } = useAuth();
-  const [emails, setEmails] = useState([]);
+  const { user, token } = useAuth();
+  const { emails, setEmails, loading, setLoading } = useEmailStore();
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
   const [liveMessage, setLiveMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'threads'
+  const [selectedThreadId, setSelectedThreadId] = useState(null);
+
+  // 1. Activate real-time SSE stream
+  useSSE(token);
 
   const fetchEmails = useCallback(async () => {
     try {
@@ -21,27 +28,67 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
         page: pagination.page,
         limit: pagination.limit,
         ...(filter.category ? { category: filter.category } : {}),
+        ...(Array.isArray(filter.categoryIn) && filter.categoryIn.length ? { categoryIn: filter.categoryIn.join(',') } : {}),
         ...(filter.priority ? { priority: filter.priority } : {}),
+        ...(filter.followUp !== undefined ? { followUp: filter.followUp } : {}),
+        ...(filter.actionRequired !== undefined ? { actionRequired: filter.actionRequired } : {}),
+        ...(Array.isArray(filter.labels) && filter.labels.length ? { labels: filter.labels.join(',') } : {}),
         ...(query ? { q: query } : {}),
       };
-      const response = await emailAPI.getEmails(params);
-      setEmails(response.data.emails);
-      setPagination((prev) => ({
-        ...prev,
-        total: response.data.pagination.total,
-        pages: response.data.pagination.pages,
-      }));
+
+      if (query) {
+        const response = await emailAPI.searchEmails(params);
+        const data = response.data || {};
+        setEmails(data.emails || []);
+        setPagination((prev) => ({
+          ...prev,
+          total: data.pagination?.total || 0,
+          pages: data.pagination?.pages || 0,
+        }));
+      } else if (viewMode === 'threads') {
+        const response = await emailAPI.getThreads(params);
+        const data = response.data || {};
+        setEmails(data.threads || []);
+        setPagination((prev) => ({
+          ...prev,
+          total: data.pagination?.total || 0,
+          pages: data.pagination?.pages || 0,
+        }));
+      } else {
+        const response = await emailAPI.getEmails(params);
+        const data = response.data || {};
+        setEmails(data.emails || []);
+        setPagination((prev) => ({
+          ...prev,
+          total: data.pagination?.total || 0,
+          pages: data.pagination?.pages || 0,
+        }));
+      }
     } catch (error) {
       console.error('Failed to fetch emails:', error);
     } finally {
       setLoading(false);
     }
-  }, [filter.category, filter.priority, pagination.limit, pagination.page, query]);
+  }, [
+    filter.actionRequired,
+    filter.category,
+    filter.categoryIn,
+    filter.followUp,
+    filter.labels,
+    filter.priority,
+    pagination.limit,
+    pagination.page,
+    query,
+    setEmails,
+    setLoading,
+    viewMode,
+  ]);
 
   useEffect(() => {
     fetchEmails();
   }, [fetchEmails]);
 
+  // 2. Fallback: Socket.IO for older browser support or specific event types
   useEffect(() => {
     if (!user?.id || !user?.hasGmailAccess) {
       return undefined;
@@ -53,18 +100,19 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
     }
 
     const handleNewEmails = (incomingEmails = []) => {
+      // With Zustand + SSE, we only use this as a trigger for a full refresh 
+      // if needed, or to show a notification message.
       const count = Array.isArray(incomingEmails) ? incomingEmails.length : 0;
-      setLiveMessage(count ? `${count} new email${count > 1 ? 's' : ''} arrived just now.` : 'Inbox updated.');
-      void fetchEmails();
+      setLiveMessage(count ? `${count} new email${count > 1 ? 's' : ''} arrived.` : 'Inbox updated.');
     };
 
     socket.on('new-emails', handleNewEmails);
 
     return () => {
       socket.off('new-emails', handleNewEmails);
-      disconnectSocket();
+      // disconnectSocket(); // Keep active for other components
     };
-  }, [fetchEmails, user?.hasGmailAccess, user?.id]);
+  }, [user?.hasGmailAccess, user?.id]);
 
   const handlePageChange = (newPage) => {
     setPagination((prev) => ({ ...prev, page: newPage }));
@@ -114,6 +162,20 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
               setQuery(event.target.value);
             }}
           />
+          <div className="view-toggle">
+            <button 
+              className={`button ${viewMode === 'list' ? 'button-secondary' : 'button-ghost'}`}
+              onClick={() => setViewMode('list')}
+            >
+              List
+            </button>
+            <button 
+              className={`button ${viewMode === 'threads' ? 'button-secondary' : 'button-ghost'}`}
+              onClick={() => setViewMode('threads')}
+            >
+              Threads
+            </button>
+          </div>
           <button className="button button-secondary" onClick={handleSync}>
             Sync now
           </button>
@@ -129,13 +191,30 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
       </div>
 
       <div className="stack-list">
-        {emails.length > 0 ? (
-          emails.map((email) => <EmailCard key={email.id} email={email} onUpdate={fetchEmails} />)
+        {selectedThreadId ? (
+          <ThreadView 
+            threadId={selectedThreadId} 
+            onBack={() => setSelectedThreadId(null)} 
+          />
         ) : (
-          <div className="empty-card">
-            <h3>No emails matched this view.</h3>
-            <p>Try another category, adjust the search query, or run a new Gmail sync.</p>
-          </div>
+          <>
+            {emails.length > 0 ? (
+              emails.map((email) => (
+                <EmailCard 
+                  key={email.id} 
+                  email={email} 
+                  onUpdate={fetchEmails} 
+                  onThreadClick={email.threadId ? () => setSelectedThreadId(email.threadId) : null}
+                  isThreadHead={viewMode === 'threads'}
+                />
+              ))
+            ) : (
+              <div className="empty-card">
+                <h3>No emails matched this view.</h3>
+                <p>Try another category, adjust the search query, or run a new Gmail sync.</p>
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -1,5 +1,5 @@
 const prisma = require('../config/database');
-const { getGmailClient } = require('../utils/gmailClient');
+const { getAuthenticatedGmailClient } = require('./tokenService');
 const { analyzeEmailIntelligence } = require('../utils/classifier');
 const { classifyEmail: xaiClassify, summarizeEmail: xaiSummarize } = require('../utils/xai');
 const { extractTasksWithAI } = require('./taskExtractor');
@@ -178,6 +178,7 @@ function buildEmailPayload(message) {
     isSent: labelIds.includes('SENT'),
     receivedAt: message.data.internalDate ? new Date(Number.parseInt(message.data.internalDate, 10)) : new Date(),
     isRead: !labelIds.includes('UNREAD'),
+    accountId: message.accountId, // Ensure accountId is passed through
   };
 }
 
@@ -204,6 +205,7 @@ async function persistEmail(userId, payload, existingEmail) {
     isRead: payload.isRead,
     threadId: payload.threadId,
     receivedAt: payload.receivedAt,
+    accountId: payload.accountId,
   };
 
   const aiContent = buildAIEmailContent(payload);
@@ -311,9 +313,11 @@ async function persistEmail(userId, payload, existingEmail) {
 }
 
 async function syncInboxInternal(userId, maxResults = 35, options = {}) {
-  const { returnMeta = false } = options;
-  const user = await getAuthenticatedUser(userId);
-  const gmail = getGmailClient(user.accessToken, user.refreshToken);
+  const { returnMeta = false, accountId = null } = options;
+  // Validates Gmail is connected; the token check happens inside getAuthenticatedGmailClient.
+  await getAuthenticatedUser(userId);
+  // Build the Gmail client with a guaranteed-fresh access token.
+  const gmail = await getAuthenticatedGmailClient(userId, accountId);
 
   try {
     const response = await gmail.users.messages.list({
@@ -357,6 +361,7 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
           format: 'full',
         });
 
+        message.accountId = accountId; // Pass accountId to payload builder
         const payload = buildEmailPayload(message);
         const existingEmail = existingByMessageId.get(payload.messageId) || null;
         const result = await persistEmail(userId, payload, existingEmail);
@@ -379,8 +384,6 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
       where: { id: userId },
       data: {
         lastSyncAt: new Date(),
-        accessToken: user.accessToken,
-        refreshToken: user.refreshToken,
       },
     });
 

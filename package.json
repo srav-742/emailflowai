@@ -6,11 +6,11 @@
     "dev:frontend": "npm --prefix frontend run dev",
     "build:frontend": "npm --prefix frontend run build",
     "preview:frontend": "npm --prefix frontend run preview",
-    "dev:backend": "npm --prefix backend run dev",
-    "start:backend": "npm --prefix backend run start",
+    "dev:backend": "npm --prefix backend start",
+    "start:backend": "npm --prefix backend start",
     "db:generate": "npm --prefix backend run prisma:generate",
     "build": "npm run build:frontend",
-    "check": "node --check backend/src/server.js && node --check backend/src/controllers/emailController.js && node --check backend/src/controllers/authController.js && node --check backend/src/routes/authRoutes.js && node --check backend/src/routes/emailRoutes.js",
+    "check": "node --check backend/server.js && node --check backend/src/controllers/emailController.js && node --check backend/src/controllers/authController.js && node --check backend/src/routes/authRoutes.js && node --check backend/src/routes/emailRoutes.js",
     "lint": "npm --prefix frontend run lint"
   },
   "dependencies": {

@@ -13,8 +13,12 @@ const {
   aiGenerateReply,
   sendReply,
   aiProcessAll,
+  getThreads,
+  getThreadById,
+  searchEmails,
 } = require('../controllers/emailController');
 const { authenticate } = require('../middleware/auth');
+const planGating = require('../middleware/planGating');
 
 const router = express.Router();
 
@@ -23,7 +27,10 @@ router.use(authenticate);
 
 router.get('/fetch', fetchEmails);
 router.get('/sync', syncEmails);
+router.get('/search', searchEmails);
 router.get('/', getEmails);
+router.get('/threads', getThreads);
+router.get('/threads/:threadId', getThreadById);
 router.get('/stats', getStats);
 router.post('/classify', classifyEmails);
 router.get('/:id', getEmailById);
@@ -31,10 +38,10 @@ router.post('/:id/summarize', summarizeEmail);
 router.post('/:id/extract-tasks', extractEmailTasks);
 router.post('/:id/reply/send', sendReply);
 
-// AI-Powered Routes (Groq)
-router.post('/ai/process-all', aiProcessAll);
-router.post('/ai/:id/summarize', aiSummarize);
-router.post('/ai/:id/classify', aiClassify);
-router.post('/ai/:id/reply', aiGenerateReply);
+// AI-Powered Routes (Groq) - Gated by Plan (Relaxed for now to avoid 403)
+router.post('/ai/process-all', planGating(['pro', 'basic', 'free']), aiProcessAll);
+router.post('/ai/:id/summarize', planGating(['pro']), aiSummarize);
+router.post('/ai/:id/classify', planGating(['pro', 'basic']), aiClassify);
+router.post('/ai/:id/reply', planGating(['pro']), aiGenerateReply);
 
 module.exports = router;

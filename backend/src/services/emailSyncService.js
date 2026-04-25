@@ -30,20 +30,32 @@ async function pollInbox(io) {
       },
     });
 
+    console.log(`[Sync] Polling ${users.length} user(s) with active tokens...`);
     for (const user of users) {
+      console.log(`[Sync] Processing user: ${user.email} (${user.id})`);
       try {
-        const result = await syncInbox(user.id, 25, { returnMeta: true });
+        // Fetch all connected email accounts for this user
+        const accounts = await prisma.emailAccount.findMany({
+          where: { userId: user.id },
+          select: { id: true, email: true }
+        });
 
-        if (result.warning) {
-          console.warn(`Sync warning for user ${user.id}: ${result.warning}`);
+        // Also check the legacy user account (compatibility)
+        const legacyUser = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { accessToken: true, refreshToken: true }
+        });
+
+        // Sync legacy account if it has tokens
+        if (legacyUser?.accessToken || legacyUser?.refreshToken) {
+          await syncAndNotify(io, user, null); 
         }
 
-        if (result.newEmails.length > 0) {
-          console.log(`Live sync detected ${result.newEmails.length} new email(s) for user ${user.id}`);
-          emitEmailNotifications(io, user, result.newEmails);
-          // Generate a single Groq AI summary for all new emails and push to dashboard
-          void broadcastInboxSummary(io, user, result.newEmails);
+        // Sync all new-style accounts
+        for (const account of accounts) {
+          await syncAndNotify(io, user, account.id);
         }
+
       } catch (error) {
         console.error(`Polling error for user ${user.id}:`, error.message || error);
       }
@@ -52,6 +64,22 @@ async function pollInbox(io) {
     console.error('Polling error:', error.message || error);
   } finally {
     isPolling = false;
+  }
+}
+
+async function syncAndNotify(io, user, accountId) {
+  try {
+    const result = await syncInbox(user.id, 25, { returnMeta: true, accountId });
+
+    if (result.newEmails.length > 0) {
+      console.log(`Live sync detected ${result.newEmails.length} new email(s) for user ${user.id} (Account: ${accountId || 'primary'})`);
+      emitEmailNotifications(io, user, result.newEmails);
+      void broadcastInboxSummary(io, user, result.newEmails);
+    }
+  } catch (error) {
+    if (!error.message?.includes('Please reconnect')) {
+      console.error(`Sync error for user ${user.id} account ${accountId}:`, error.message);
+    }
   }
 }
 

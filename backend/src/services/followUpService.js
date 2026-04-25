@@ -4,10 +4,16 @@ const { emitFollowUpNotifications } = require('./notificationService');
 const FOLLOW_UP_DAYS = Number(process.env.FOLLOW_UP_DAYS || 2);
 
 async function detectFollowUps(io = null) {
+  // Only look at sent emails from the last 30 days to keep it performant
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
   const sentEmails = await prisma.email.findMany({
     where: {
+      userId: { not: undefined }, // Ensure userId exists
       isSent: true,
       threadId: { not: null },
+      receivedAt: { gte: thirtyDaysAgo },
     },
     orderBy: { receivedAt: 'desc' },
     select: {

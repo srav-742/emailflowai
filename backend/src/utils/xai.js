@@ -419,14 +419,28 @@ Common phrases: ${(styleProfile.commonPhrases || []).join(', ') || 'none'}`
       [
         {
           role: 'system',
-          content: `You write polished, ready-to-send email replies. Tone: ${tone}. ${styleInstruction} Never use placeholders like [Name]. If details are unknown, be politely vague.`,
+          content: `You are a writing assistant that perfectly mimics the user's voice.
+          
+LEARNED STYLE PROFILE:
+Tone: ${styleProfile.tone || tone}
+Sentence Structure: ${styleProfile.sentenceLength || 'medium'}
+Greetings: ${styleProfile.greetingStyle || 'Professional but natural'}
+Sign-offs: ${styleProfile.signatureStyle || 'Professional'}
+Specific Voice Notes: ${styleProfile.styleSummary || 'Concise and helpful'}
+Favorite Phrases: ${(styleProfile.commonPhrases || []).join(', ') || 'none'}
+
+INSTRUCTIONS:
+1. Write a response in the user's voice based on the profile above.
+2. Do NOT use bracketed placeholders like [Name]. Use context or skip the name if uncertain.
+3. If the user's style is casual, avoid corporate jargon.
+4. Keep the response ready-to-send.`,
         },
         {
           role: 'user',
-          content: `Draft a ${tone} reply to this email:\n\n${truncateForPrompt(emailContent)}`,
+          content: `Draft a reply to this email:\n\n${truncateForPrompt(emailContent)}`,
         },
       ],
-      { maxTokens: 450, temperature: 0.5 },
+      { maxTokens: 450, temperature: 0.7 },
     );
 
     return content || fallbackReply;

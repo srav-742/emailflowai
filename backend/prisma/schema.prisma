@@ -28,10 +28,28 @@ model User {
 
   emails           Email[]
   aiLogs           AILog[]
+  aiTraining       AITraining[]
   emailAccounts    EmailAccount[]
   stats            UserStats?
 
   @@map("users")
+}
+
+model AITraining {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  emailId      String   @map("email_id")
+  originalText String   @db.Text @map("original_text")
+  editedText   String   @db.Text @map("edited_text")
+  tone         String?
+  context      String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([emailId])
+  @@map("ai_training")
 }
 
 model Email {
@@ -67,11 +85,12 @@ model Email {
   account        EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
   aiLogs         AILog[]
 
-  @@index([userId])
-  @@unique([userId, messageId])
+  @@index([userId, createdAt])
+  @@index([userId, category])
+  @@index([threadId])
   @@index([accountId])
-  @@index([category])
   @@index([priority])
+  @@unique([userId, messageId])
   @@map("emails")
 }
 

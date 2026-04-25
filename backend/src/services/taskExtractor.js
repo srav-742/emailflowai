@@ -193,14 +193,17 @@ async function extractTasksWithAI(email = {}) {
   }
 
   const prompt = [
-    'Extract action items from this email.',
-    'Return ONLY a valid JSON array. No markdown, no commentary.',
-    'Each item must have: id (string), task (string), deadline (string|null), priority (low|medium|high), completed (false).',
-    'If no action items exist, return [].',
+    'You are a high-precision task extraction engine. Extract ALL actionable items, requests, and deadlines from this email.',
+    'RULES:',
+    '1. Return ONLY a valid JSON array. No markdown, no preamble, no "Here is the JSON".',
+    '2. Each object must have: "id" (unique string), "task" (clear description), "deadline" (date or time if mentioned, else null), "priority" (low|medium|high), "completed" (false).',
+    '3. If the sender asks for something (e.g. "Can you send the report?"), it IS a task.',
+    '4. If a deadline is implicit (e.g. "by EOD tomorrow"), resolve it to a readable format.',
+    '5. If NO actionable items are found, return exactly [].',
     '',
     `Subject: ${email.subject || 'No subject'}`,
     `From: ${email.sender || 'Unknown sender'}`,
-    `Body: ${truncateForPrompt(email.body || email.snippet || 'No body')}`,
+    `Body: ${truncateForPrompt(email.body || email.snippet || 'No body', 2500)}`,
   ].join('\n');
 
   try {

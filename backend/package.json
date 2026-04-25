@@ -1,10 +1,10 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "main": "src/server.js",
+  "main": "server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "dev": "node server.js",
+    "start": "node server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
@@ -22,6 +22,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.4.0",
     "express-session": "^1.19.0",
     "firebase-admin": "^13.7.0",
     "google-auth-library": "^10.6.2",
@@ -29,7 +30,8 @@
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "stripe": "^22.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.9",

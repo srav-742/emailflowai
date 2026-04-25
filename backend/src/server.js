@@ -7,10 +7,13 @@ require('dotenv').config();
 const authRoutes = require('./routes/authRoutes');
 const emailRoutes = require('./routes/emailRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const streamRoutes = require('./routes/streamRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
 const { getUserSocketRoom } = require('./utils/socketRooms');
 const { startEmailPolling } = require('./services/emailSyncService');
+const { generalLimiter, aiLimiter } = require('./middleware/rateLimiter');
 const redis = require('./redisClient');
 
 
@@ -45,6 +48,7 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 
@@ -83,11 +87,27 @@ io.use(async (socket, next) => {
 });
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, or same-origin)
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Explicitly check for specific production domains if FRONTEND_URL is missing
+    const extraAllowed = ['https://email-flow-ai.vercel.app'];
+    if (extraAllowed.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn(`[CORS Blocked]: Origin ${origin} is not in allowlist`);
+    return callback(new Error('CORS not allowed by policy'), false);
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
 }));
+
+app.use(generalLimiter);
 
 // Security headers — use unsafe-none for COOP to allow Google OAuth popup communication
 app.use((req, res, next) => {
@@ -112,11 +132,18 @@ app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => {
   res.status(204).end();
 });
 
+// Strict rate limiting for AI and Auth
+app.use('/api/ai', aiLimiter);
+app.use('/api/auth', aiLimiter);
+app.use('/auth', aiLimiter);
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/auth', authRoutes);
 app.use('/api/emails', emailRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/stream', streamRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.get('/api/health', async (req, res) => {
   let database = 'disconnected';
@@ -151,6 +178,7 @@ app.use((req, res, next) => {
   }
 
   if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
+    console.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
     return res.status(404).json({
       error: 'Route not found',
       path: req.originalUrl,
@@ -196,9 +224,14 @@ startEmailPolling(io);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(err.status || 500).json({
+  const statusCode = err.status || 500;
+  
+  console.error(`[Server Error] ${req.method} ${req.path}:`, err.stack || err);
+
+  res.status(statusCode).json({
     error: err.message || 'Internal server error',
+    code: err.code || 'SERVER_ERROR',
+    ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {}),
   });
 });
 

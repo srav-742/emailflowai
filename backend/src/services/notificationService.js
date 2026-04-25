@@ -1,5 +1,6 @@
 const { matchesImportantContact } = require('../utils/contactUtils');
 const { getUserSocketRoom } = require('../utils/socketRooms');
+const notificationEmitter = require('../utils/eventEmitter');
 
 function getImportantEmails(newEmails = [], user = {}) {
   const importantContacts = Array.isArray(user.importantContacts) ? user.importantContacts : [];
@@ -15,6 +16,10 @@ function getImportantEmails(newEmails = [], user = {}) {
 
 function emitEmailNotifications(io, user, newEmails = []) {
   const room = getUserSocketRoom(user.id);
+  
+  // SSE Bridge
+  notificationEmitter.emit('new-emails', { userId: user.id, emails: newEmails });
+
   if (newEmails.length > 0) {
     io.to(room).emit('new-emails', newEmails);
   }

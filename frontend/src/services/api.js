@@ -46,6 +46,8 @@ export const emailAPI = {
   aiClassify: (id) => api.post(`/emails/ai/${id}/classify`),
   aiGenerateReply: (id, tone = 'professional') => api.post(`/emails/ai/${id}/reply`, { tone }),
   aiProcessAll: () => api.post('/emails/ai/process-all'),
+  getCategoryCounts: () => api.get('/emails/counts'),
+  updateEmailCategory: (id, category) => api.patch(`/emails/${id}/category`, { category }),
 };
 
 export const aiAPI = {
@@ -74,6 +76,12 @@ export const digestAPI = {
   getToday: () => api.get('/digest/today'),
   getPreferences: () => api.get('/digest/preferences'),
   updatePreferences: (data) => api.patch('/digest/preferences', data),
+};
+
+export const billingAPI = {
+  createCheckout: (priceId) => api.post('/billing/checkout', { priceId }),
+  createPortal: () => api.post('/billing/portal'),
+  getSubscription: () => api.get('/billing/subscription'),
 };
 
 export default api;

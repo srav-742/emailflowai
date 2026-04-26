@@ -6,6 +6,7 @@ import GmailConnect from './pages/GmailConnect';
 import GmailCallback from './pages/GmailCallback';
 import Dashboard from './pages/Dashboard';
 import EmailList from './pages/EmailList';
+import PricingPage from './pages/PricingPage';
 import DigestSettings from './pages/Settings/DigestSettings';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
@@ -88,6 +89,7 @@ function App() {
           <Route path="newsletters" element={<EmailList title="Newsletters" description="Latest updates from your favorite publications." filter={{ category: 'newsletter' }} />} />
           <Route path="waiting" element={<EmailList title="Waiting for Reply" description="Emails where you are expecting a response." filter={{ followUp: true }} />} />
           <Route path="settings/digest" element={<DigestSettings />} />
+          <Route path="pricing" element={<PricingPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

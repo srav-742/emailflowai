@@ -1,4 +1,5 @@
 const prisma = require('../config/database');
+const redis = require('../redisClient');
 const { analyzeEmailIntelligence, generateSummary } = require('../utils/classifier');
 const { summarizeBatchEmails, generateReply, XAI_MODEL } = require('../utils/xai');
 const { extractTasksWithAI } = require('../services/taskExtractor');
@@ -75,11 +76,34 @@ const fetchEmails = async (req, res) => {
 
 const getEmails = async (req, res) => {
   try {
-    const { category, categoryIn, priority, followUp, isRead, actionRequired, labels, page = 1, limit = 20, q } = req.query;
+    const { category, categoryIn, priority, followUp, isRead, actionRequired, labels, limit = 20, q, cursor } = req.query;
+    const userId = req.user.id;
+
+    if (category === 'waiting') {
+      const followUps = await prisma.followUp.findMany({
+        where: { userId, status: 'waiting' },
+        include: { email: true },
+        orderBy: { sentAt: 'desc' },
+        take: Number(limit) + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+
+      let nextCursor = null;
+      if (followUps.length > Number(limit)) {
+        const nextItem = followUps.pop();
+        nextCursor = nextItem.id;
+      }
+
+      return res.json({
+        emails: followUps.map(f => ({ ...f.email, followUpStatus: f.status })),
+        pagination: { nextCursor },
+      });
+    }
+
     const categories = parseCsvList(categoryIn);
     const labelList = parseCsvList(labels);
     const where = {
-      userId: req.user.id,
+      userId,
       ...(category ? { category: String(category) } : {}),
       ...(categories.length ? { category: { in: categories } } : {}),
       ...(priority ? { priority: String(priority) } : {}),
@@ -99,24 +123,67 @@ const getEmails = async (req, res) => {
     const emails = await prisma.email.findMany({
       where,
       orderBy: { receivedAt: 'desc' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
+      take: Number(limit) + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
-    const total = await prisma.email.count({ where });
+    let nextCursor = null;
+    if (emails.length > Number(limit)) {
+      const nextItem = emails.pop();
+      nextCursor = nextItem.id;
+    }
 
     res.json({
       emails,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.max(1, Math.ceil(total / Number(limit))),
-      },
+      pagination: { nextCursor },
     });
   } catch (error) {
     console.error('Get emails error:', error);
     res.status(500).json({ error: 'Failed to get emails' });
+  }
+};
+
+const getCategoryCounts = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const cacheKey = `counts:${userId}`;
+    
+    const cached = await redis.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+
+    const [focusToday, readLater, newsletter, waiting] = await Promise.all([
+      prisma.email.count({ where: { userId, category: 'focus_today', isRead: false } }),
+      prisma.email.count({ where: { userId, category: 'read_later', isRead: false } }),
+      prisma.email.count({ where: { userId, category: 'newsletter', isRead: false } }),
+      prisma.followUp.count({ where: { userId, status: 'waiting' } }),
+    ]);
+
+    const counts = { focus_today: focusToday, read_later: readLater, newsletter: newsletter, waiting };
+    await redis.setex(cacheKey, 300, JSON.stringify(counts));
+    
+    res.json(counts);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get counts' });
+  }
+};
+
+const updateEmailCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { category } = req.body;
+    const userId = req.user.id;
+
+    const email = await prisma.email.update({
+      where: { id, userId },
+      data: { category },
+    });
+
+    // Invalidate counts cache
+    await redis.del(`counts:${userId}`);
+
+    res.json({ message: 'Category updated', email });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update category' });
   }
 };
 
@@ -755,4 +822,6 @@ module.exports = {
   getThreads,
   getThreadById,
   searchEmails,
+  getCategoryCounts,
+  updateEmailCategory,
 };

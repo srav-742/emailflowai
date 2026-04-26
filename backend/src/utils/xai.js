@@ -537,5 +537,6 @@ module.exports = {
   checkReplyRequired,
   summarizeDailyDigest,
   requestGroq,
+  extractJsonBlock,
   XAI_MODEL
 };

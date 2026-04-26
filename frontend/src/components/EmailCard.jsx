@@ -73,6 +73,15 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
     }
   };
 
+  const handleCategoryChange = async (newCategory) => {
+    try {
+      await emailAPI.updateEmailCategory(email.id, newCategory);
+      if (onUpdate) onUpdate();
+    } catch (error) {
+      console.error('Failed to update category:', error);
+    }
+  };
+
   const showDetails = expanded || !compact;
   const showControls = (!compact || expanded) && !isThreaded;
   
@@ -175,9 +184,27 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
       </div>
 
       <div className="mail-label-row">
-        <span className="mail-category" style={{ borderColor: getPriorityColor(email.priority) }}>
-          {email.category || 'general'}
-        </span>
+        <select 
+          className="mail-category-select" 
+          value={email.category || 'other'} 
+          onChange={(e) => handleCategoryChange(e.target.value)}
+          style={{ 
+            borderColor: getPriorityColor(email.priority),
+            background: 'transparent',
+            color: 'inherit',
+            fontSize: '0.8rem',
+            padding: '2px 8px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            border: `1px solid ${getPriorityColor(email.priority)}`
+          }}
+        >
+          <option value="focus_today">🔥 Focus Today</option>
+          <option value="read_later">📚 Read Later</option>
+          <option value="newsletter">📧 Newsletter</option>
+          <option value="other">💬 Other</option>
+          <option value="uncategorized">❓ Uncategorized</option>
+        </select>
         {(email.labels || []).slice(0, 4).map((label) => (
           <span key={label} className="mail-label">
             {label}

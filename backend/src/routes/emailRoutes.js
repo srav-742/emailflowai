@@ -16,6 +16,8 @@ const {
   getThreads,
   getThreadById,
   searchEmails,
+  getCategoryCounts,
+  updateEmailCategory,
 } = require('../controllers/emailController');
 const { authenticate } = require('../middleware/auth');
 const planGating = require('../middleware/planGating');
@@ -32,8 +34,10 @@ router.get('/', getEmails);
 router.get('/threads', getThreads);
 router.get('/threads/:threadId', getThreadById);
 router.get('/stats', getStats);
+router.get('/counts', getCategoryCounts);
 router.post('/classify', classifyEmails);
 router.get('/:id', getEmailById);
+router.patch('/:id/category', updateEmailCategory);
 router.post('/:id/summarize', summarizeEmail);
 router.post('/:id/extract-tasks', extractEmailTasks);
 router.post('/:id/reply/send', sendReply);

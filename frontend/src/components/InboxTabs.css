@@ -1,0 +1,47 @@
+.inbox-tabs {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border-color, #333);
+  margin-bottom: 1.5rem;
+  overflow-x: auto;
+}
+
+.inbox-tab-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.inbox-tab-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-color, #fff);
+}
+
+.inbox-tab-item.active {
+  background: rgba(var(--primary-rgb, 99, 102, 241), 0.1);
+  color: var(--primary-color, #6366f1);
+  border-color: rgba(var(--primary-rgb, 99, 102, 241), 0.3);
+}
+
+.tab-badge {
+  background: var(--primary-color, #6366f1);
+  color: #fff;
+  padding: 0.1rem 0.5rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.tab-icon {
+  font-size: 1.2rem;
+}

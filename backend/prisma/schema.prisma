@@ -36,6 +36,7 @@ model User {
   followUps        FollowUp[]
   digests          DailyDigest[]
   digestPreference DigestPreference?
+  subscription     Subscription?
 
   @@map("users")
 }
@@ -69,7 +70,7 @@ model Email {
   summary        String?   @db.Text
   tasks          Json?
   priority       String    @default("normal")
-  category       String    @default("general")
+  category       String    @default("uncategorized")
   labels         String[]  @default([])
   actionRequired Boolean   @default(false) @map("action_required")
   sender         String?
@@ -83,6 +84,9 @@ model Email {
   followUpAt     DateTime? @map("follow_up_at")
   receivedAt     DateTime  @default(now()) @map("received_at")
   isRead         Boolean   @default(false) @map("is_read")
+  isStarred      Boolean   @default(false) @map("is_starred")
+  aiConfidence   Float?    @map("ai_confidence")
+  categorizedAt  DateTime? @map("categorized_at")
   searchVector   Unsupported("tsvector")? @map("search_vector")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
@@ -95,7 +99,7 @@ model Email {
   followUps      FollowUp[]
 
   @@index([userId, createdAt])
-  @@index([userId, category])
+  @@index([userId, category, receivedAt(sort: Desc)])
   @@index([threadId])
   @@index([accountId])
   @@index([priority])
@@ -251,4 +255,26 @@ model DigestPreference {
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("digest_preferences")
+}
+
+model Subscription {
+  id                   String    @id @default(uuid())
+  userId               String    @unique @map("user_id")
+  stripeCustomerId     String?   @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  stripePriceId        String?   @map("stripe_price_id")
+  plan                 String    @default("free")
+  status               String    @default("active")
+  currentPeriodStart   DateTime? @map("current_period_start")
+  currentPeriodEnd     DateTime? @map("current_period_end")
+  cancelAtPeriodEnd    Boolean   @default(false) @map("cancel_at_period_end")
+  trialEnd             DateTime? @map("trial_end")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([stripeCustomerId])
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
 }

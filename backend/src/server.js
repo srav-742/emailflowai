@@ -8,10 +8,11 @@ const authRoutes = require('./routes/authRoutes');
 const emailRoutes = require('./routes/emailRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const streamRoutes = require('./routes/streamRoutes');
-const paymentRoutes = require('./routes/paymentRoutes');
 const actionItemRoutes = require('./routes/actionItemRoutes');
 const followUpRoutes = require('./routes/followUpRoutes');
 const digestRoutes = require('./routes/digestRoutes');
+const billingRoutes = require('./routes/billingRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
 const digestService = require('./services/digestService');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
@@ -120,6 +121,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Stripe webhooks need raw body, so we place it before express.json()
+app.use('/api/webhooks', webhookRoutes);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -147,10 +151,10 @@ app.use('/auth', authRoutes);
 app.use('/api/emails', emailRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/stream', streamRoutes);
-app.use('/api/payments', paymentRoutes);
 app.use('/api/action-items', actionItemRoutes);
 app.use('/api/follow-ups', followUpRoutes);
 app.use('/api/digest', digestRoutes);
+app.use('/api/billing', billingRoutes);
 
 // Start background digest scheduler (check every 15 mins)
 setInterval(() => {

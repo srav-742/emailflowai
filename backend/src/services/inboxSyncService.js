@@ -7,6 +7,7 @@ const { refreshThreadIntelligence } = require('./threadService');
 const { extractBatchActionItems } = require('./actionItemService');
 const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
 const { detectAndCreateFollowUp, resolveFollowUpIfReplied } = require('./followUpService');
+const { categorizeEmailsBatch } = require('../lib/ai/categorizeEmail');
 
 const activeSyncs = new Map();
 
@@ -210,6 +211,8 @@ async function persistEmail(userId, payload, existingEmail) {
     threadId: payload.threadId,
     receivedAt: payload.receivedAt,
     accountId: payload.accountId,
+    aiConfidence: payload.aiConfidence,
+    categorizedAt: payload.categorizedAt,
   };
 
   const aiContent = buildAIEmailContent(payload);
@@ -256,17 +259,16 @@ async function persistEmail(userId, payload, existingEmail) {
   let actionRequired = payload.actionRequired;
 
   if (!payload.isSent) {
-    const [classification, aiSummary, extractedTasks] = await Promise.all([
-      xaiClassify(aiContent),
+    const [aiSummary, extractedTasks] = await Promise.all([
       xaiSummarize(aiContent, payload.subject || ''),
       extractTasksWithAI(payload),
     ]);
 
     summary = aiSummary || payload.summary;
-    priority = normalizeStoredPriority(classification?.priority || payload.priority);
-    category = classification?.category || payload.category;
-    labels = Array.isArray(classification?.labels) && classification.labels.length ? classification.labels : payload.labels;
-    actionRequired = typeof classification?.actionRequired === 'boolean' ? classification.actionRequired : payload.actionRequired;
+    priority = payload.priority; // Keep rule-based priority or update if needed
+    category = payload.category; // Now passed from batch categorization
+    labels = payload.labels;
+    actionRequired = payload.actionRequired;
     tasks = extractedTasks;
   }
 
@@ -296,6 +298,8 @@ async function persistEmail(userId, payload, existingEmail) {
         category,
         labels,
         actionRequired,
+        aiConfidence: payload.aiConfidence,
+        categorizedAt: payload.categorizedAt,
       },
     });
 
@@ -342,6 +346,8 @@ async function persistEmail(userId, payload, existingEmail) {
         labels,
         actionRequired,
         tasks,
+        aiConfidence: payload.aiConfidence,
+        categorizedAt: payload.categorizedAt,
       },
     });
 
@@ -390,6 +396,7 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
     const newEmails = [];
     let skippedMessages = 0;
 
+    const messagePayloads = [];
     for (const messageRef of messageRefs) {
       try {
         const message = await gmail.users.messages.get({
@@ -397,9 +404,33 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
           id: messageRef.id,
           format: 'full',
         });
+        message.accountId = accountId;
+        messagePayloads.push(buildEmailPayload(message));
+      } catch (error) {
+        skippedMessages += 1;
+        console.error(`Error fetching message ${messageRef.id}:`, error.message);
+      }
+    }
 
-        message.accountId = accountId; // Pass accountId to payload builder
-        const payload = buildEmailPayload(message);
+    // Batch categorization for new/uncategorized emails
+    const emailsToCategorize = messagePayloads.filter(p => !p.isSent);
+    for (let i = 0; i < emailsToCategorize.length; i += 20) {
+      const batch = emailsToCategorize.slice(i, i + 20);
+      const categorizationResults = await categorizeEmailsBatch(batch.map(p => ({
+        from: p.sender,
+        subject: p.subject,
+        snippet: p.snippet
+      })));
+      
+      batch.forEach((p, idx) => {
+        p.category = categorizationResults[idx]?.category || 'other';
+        p.aiConfidence = categorizationResults[idx]?.confidence || 0;
+        p.categorizedAt = new Date();
+      });
+    }
+
+    for (const payload of messagePayloads) {
+      try {
         const existingEmail = existingByMessageId.get(payload.messageId) || null;
         const result = await persistEmail(userId, payload, existingEmail);
         existingByMessageId.set(payload.messageId, {
@@ -413,7 +444,7 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
         }
       } catch (error) {
         skippedMessages += 1;
-        console.error(`Skipping Gmail message ${messageRef.id} during sync:`, error.message || error);
+        console.error(`Skipping Gmail message ${payload.messageId} during persist:`, error.message || error);
       }
     }
 

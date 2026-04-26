@@ -6,8 +6,10 @@ import { useSSE } from '../hooks/useSSE';
 import EmailCard from '../components/EmailCard';
 import ThreadView from '../components/ThreadView';
 import ThreadCard from '../components/ThreadCard';
+import InboxTabs from '../components/InboxTabs';
 import { connectSocket } from '../services/socket';
 import './EmailList.css';
+import './InboxTabs.css';
 
 const EmailList = ({ filter = {}, title = 'Inbox command center', description = 'Review and process every thread in one place.' }) => {
   const { user, token } = useAuth();
@@ -18,6 +20,9 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
 
   const [query, setQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
+  const [cursor, setCursor] = useState(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [activeTab, setActiveTab] = useState('focus_today');
   const [liveMessage, setLiveMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'threads'
@@ -26,75 +31,47 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
   // 1. Activate real-time SSE stream
   useSSE(token);
 
-  const fetchEmails = useCallback(async () => {
+  const fetchEmails = useCallback(async (reset = false) => {
     try {
-      setLoading(true);
+      setLoading(reset);
+      const currentCursor = reset ? null : cursor;
       const params = {
-        page: pagination.page,
         limit: pagination.limit,
-        ...(filter.category ? { category: filter.category } : {}),
-        ...(Array.isArray(filter.categoryIn) && filter.categoryIn.length ? { categoryIn: filter.categoryIn.join(',') } : {}),
-        ...(filter.priority ? { priority: filter.priority } : {}),
-        ...(filter.followUp !== undefined ? { followUp: filter.followUp } : {}),
-        ...(filter.actionRequired !== undefined ? { actionRequired: filter.actionRequired } : {}),
-        ...(Array.isArray(filter.labels) && filter.labels.length ? { labels: filter.labels.join(',') } : {}),
+        cursor: currentCursor,
+        category: activeTab,
         ...(query ? { q: query } : {}),
       };
 
+      let response;
       if (query) {
-        const response = await emailAPI.searchEmails(params);
-        const data = response.data || {};
-        setEmails(data.emails || []);
-        setPagination((prev) => ({
-          ...prev,
-          total: data.pagination?.total || 0,
-          pages: data.pagination?.pages || 0,
-        }));
+        response = await emailAPI.searchEmails(params);
       } else if (viewMode === 'threads') {
-        const response = await emailAPI.getThreads(params);
-        const data = response.data || {};
-        setEmails(data.threads || []);
-        setPagination((prev) => ({
-          ...prev,
-          total: data.pagination?.total || 0,
-          pages: data.pagination?.pages || 0,
-        }));
+        response = await emailAPI.getThreads(params);
       } else {
-        const response = await emailAPI.getEmails(params);
-        const data = response.data || {};
-        setEmails(data.emails || []);
-        setPagination((prev) => ({
-          ...prev,
-          total: data.pagination?.total || 0,
-          pages: data.pagination?.pages || 0,
-        }));
+        response = await emailAPI.getEmails(params);
       }
+
+      const data = response.data || {};
+      const newEmails = data.emails || [];
+      
+      if (reset) {
+        setEmails(newEmails);
+      } else {
+        setEmails([...emails, ...newEmails]);
+      }
+
+      setCursor(data.pagination?.nextCursor || null);
+      setHasMore(Boolean(data.pagination?.nextCursor));
     } catch (error) {
       console.error('Failed to fetch emails:', error);
     } finally {
       setLoading(false);
     }
-  }, [
-    filter.actionRequired,
-    filter.category,
-    filter.categoryIn,
-    filter.followUp,
-    filter.labels,
-    filter.priority,
-    pagination.limit,
-    pagination.page,
-    query,
-    setEmails,
-    setLoading,
-    viewMode,
-  ]);
+  }, [activeTab, cursor, emails, pagination.limit, query, setEmails, setLoading, viewMode]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchEmails();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [fetchEmails]);
+    fetchEmails(true);
+  }, [activeTab, query, viewMode]);
 
   // 2. Fallback: Socket.IO for older browser support or specific event types
   useEffect(() => {
@@ -198,6 +175,14 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
         ) : null}
       </div>
 
+      <InboxTabs 
+        activeTab={activeTab} 
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          setCursor(null);
+        }} 
+      />
+
       <div className="stack-list">
         {selectedThreadId ? (
           <ThreadView 
@@ -221,7 +206,7 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
                   <EmailCard 
                     key={item.id} 
                     email={item} 
-                    onUpdate={fetchEmails} 
+                    onUpdate={() => fetchEmails(true)} 
                     onThreadClick={item.threadId ? () => setSelectedThreadId(item.threadId) : null}
                     isThreadHead={viewMode === 'threads'}
                   />
@@ -237,16 +222,10 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
         )}
       </div>
 
-      {pagination.pages > 1 && (
+      {hasMore && !selectedThreadId && (
         <div className="pagination-row">
-          <button className="button button-ghost" disabled={pagination.page === 1} onClick={() => handlePageChange(pagination.page - 1)}>
-            Previous
-          </button>
-          <span className="pagination-info">
-            Page {pagination.page} of {pagination.pages}
-          </span>
-          <button className="button button-ghost" disabled={pagination.page >= pagination.pages} onClick={() => handlePageChange(pagination.page + 1)}>
-            Next
+          <button className="button button-ghost" onClick={() => fetchEmails(false)}>
+            Load more emails
           </button>
         </div>
       )}

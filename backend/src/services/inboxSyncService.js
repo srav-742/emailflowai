@@ -3,6 +3,7 @@ const { getAuthenticatedGmailClient } = require('./tokenService');
 const { analyzeEmailIntelligence } = require('../utils/classifier');
 const { classifyEmail: xaiClassify, summarizeEmail: xaiSummarize } = require('../utils/xai');
 const { extractTasksWithAI } = require('./taskExtractor');
+const { refreshThreadIntelligence } = require('./threadService');
 const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
 
 const activeSyncs = new Map();
@@ -395,6 +396,10 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
           timeSaved: Math.max(2, newEmails.length * 2),
         }),
       ]);
+
+      // Refresh thread intelligence for new threads
+      const affectedThreadIds = [...new Set(newEmails.map(e => e.threadId).filter(Boolean))];
+      await Promise.allSettled(affectedThreadIds.map(tid => refreshThreadIntelligence(tid, userId)));
     }
 
     const sortedEmails = sortEmailsByNewest(syncedEmails);

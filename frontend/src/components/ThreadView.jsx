@@ -59,11 +59,38 @@ const ThreadView = ({ threadId, onBack }) => {
           Back to list
         </button>
         <div className="thread-meta">
-          <span className="eyebrow">Conversation</span>
+          <span className="eyebrow">Thread Intelligence</span>
           <h2>{threadData.emails[0]?.subject || 'Untitled Thread'}</h2>
-          <p>{threadData.emails.length} messages in this thread</p>
+          <p>{threadData.emails.length} messages in this conversation</p>
         </div>
       </div>
+
+      {threadData.metadata?.summary && (
+        <div className="surface-card" style={{ 
+          marginBottom: '2rem', 
+          borderLeft: '4px solid var(--highlight)',
+          background: 'rgba(124, 58, 237, 0.03)',
+          padding: '1.5rem'
+        }}>
+          <span className="eyebrow" style={{ color: 'var(--highlight)' }}>Opportunity Briefing</span>
+          <p style={{ 
+            marginTop: '0.75rem', 
+            fontSize: '1.1rem', 
+            lineHeight: '1.6', 
+            color: 'var(--text)',
+            whiteSpace: 'pre-line'
+          }}>
+            {threadData.metadata.summary}
+          </p>
+          {threadData.metadata.deadline && (
+            <div style={{ marginTop: '1rem' }}>
+              <span className="mail-pill" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+                ⏰ Next Deadline: {threadData.metadata.deadline}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="thread-stack">
         {threadData.emails.map((email, index) => (

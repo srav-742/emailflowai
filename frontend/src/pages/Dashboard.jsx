@@ -14,11 +14,9 @@ const sortByNewest = (items) =>
 
 const mergeIncomingEmails = (currentEmails, incomingEmails) => {
   const merged = new Map();
-
   sortByNewest([...incomingEmails, ...currentEmails]).forEach((email) => {
     merged.set(email.id, email);
   });
-
   return Array.from(merged.values());
 };
 
@@ -33,8 +31,8 @@ const Dashboard = () => {
   const [notice, setNotice] = useState(null);
   const [inboxSummary, setInboxSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [stats, setStats] = useState({ totalEmails: 0, unreadCount: 0, actionRequired: 0, followUpCount: 0 });
 
-  // Step Calculation Logic
   const currentStep = useMemo(() => {
     if (!user?.hasGmailAccess) return 1;
     if (emails.length === 0) return 2;
@@ -59,6 +57,7 @@ const Dashboard = () => {
     try {
       const response = await emailAPI.getStats();
       const data = response.data || {};
+      if (data.stats) setStats(data.stats);
       return data.stats;
     } catch (error) {
       console.error('Failed to fetch stats:', error);
@@ -66,32 +65,10 @@ const Dashboard = () => {
     }
   }, []);
 
-  const fetchMorningBrief = useCallback(async () => {
-    try {
-      const response = await aiAPI.getMorningBrief();
-      const data = response.data || {};
-      return data.brief;
-    } catch (error) {
-      console.error('Failed to fetch morning brief:', error);
-      return null;
-    }
-  }, []);
-
-  const fetchAnalytics = useCallback(async () => {
-    try {
-      const response = await aiAPI.getAnalytics();
-      const data = response.data || {};
-      return data.stats;
-    } catch (error) {
-      console.error('Failed to fetch analytics:', error);
-      return null;
-    }
-  }, []);
-
   const fetchInboxSummary = useCallback(async () => {
     try {
       setLoadingSummary(true);
-      const response = await aiAPI.getInboxSummary(20);
+      const response = await aiAPI.getInboxSummary(35);
       const data = response.data || {};
       setInboxSummary(data);
       return data;
@@ -103,24 +80,20 @@ const Dashboard = () => {
     }
   }, []);
 
-  const refreshEmailInsights = useCallback(async () => {
-    await Promise.all([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), fetchInboxSummary()]);
-  }, [fetchAnalytics, fetchEmails, fetchMorningBrief, fetchStats, fetchInboxSummary]);
-
   const refreshWorkspace = useCallback(async () => {
-    await Promise.all([refreshEmailInsights(), refreshProfile()]);
-  }, [refreshEmailInsights, refreshProfile]);
+    await Promise.all([fetchEmails(), fetchStats(), fetchInboxSummary(), refreshProfile()]);
+  }, [fetchEmails, fetchStats, fetchInboxSummary, refreshProfile]);
 
   useEffect(() => {
     let active = true;
     const loadDashboard = async () => {
       setLoading(true);
-      await Promise.allSettled([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), fetchInboxSummary(), refreshProfile()]);
+      await Promise.allSettled([fetchEmails(), fetchStats(), fetchInboxSummary(), refreshProfile()]);
       if (active) setLoading(false);
     };
     void loadDashboard();
     return () => { active = false; };
-  }, [fetchAnalytics, fetchEmails, fetchInboxSummary, fetchMorningBrief, fetchStats, refreshProfile]);
+  }, [fetchEmails, fetchInboxSummary, fetchStats, refreshProfile]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -130,65 +103,39 @@ const Dashboard = () => {
   }, [refreshWorkspace]);
 
   useEffect(() => {
-    if (!user?.id || !user?.hasGmailAccess) {
-      return undefined;
-    }
+    if (!user?.id || !user?.hasGmailAccess) return undefined;
 
     const socket = connectSocket(user.id);
     if (!socket) return undefined;
 
-    const handleConnect = () => {};
-    const handleDisconnect = () => {};
-
     const handleNewEmails = (incomingEmails = []) => {
       if (!Array.isArray(incomingEmails) || incomingEmails.length === 0) return;
       setEmails((currentEmails) => mergeIncomingEmails(currentEmails, incomingEmails));
-      setNotice({ tone: 'ok', text: `${incomingEmails.length} new email(s) analyzed automatically.` });
-      void Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
+      setNotice({ tone: 'ok', text: `${incomingEmails.length} new email(s) analyzed.` });
+      void Promise.all([fetchStats(), fetchInboxSummary(), refreshProfile()]);
     };
 
-    const handleInboxSummary = (data) => { if (data?.summary) setInboxSummary(data); };
+    const handleInboxSummary = (data) => { if (data?.executive_summary) setInboxSummary(data); };
 
-    const handleImportantEmail = (email) => {
-      setNotice({ tone: 'warn', text: `Urgent email detected: ${email.subject || 'Untitled'}.` });
-      void Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics()]);
-    };
-
-    const handleFollowUpReady = (followUps = []) => {
-      if (followUps?.length > 0) {
-        setNotice({ tone: 'warn', text: `${followUps.length} follow-up reminder(s) ready.` });
-      }
-      void Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics()]);
-    };
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
     socket.on('new-emails', handleNewEmails);
     socket.on('inbox-summary', handleInboxSummary);
-    socket.on('important-email', handleImportantEmail);
-    socket.on('follow-up-ready', handleFollowUpReady);
-
-    if (socket.connected) handleConnect();
 
     return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
       socket.off('new-emails', handleNewEmails);
       socket.off('inbox-summary', handleInboxSummary);
-      socket.off('important-email', handleImportantEmail);
-      socket.off('follow-up-ready', handleFollowUpReady);
       disconnectSocket();
     };
-  }, [fetchAnalytics, fetchMorningBrief, fetchStats, refreshProfile, user?.hasGmailAccess, user?.id]);
+  }, [fetchInboxSummary, fetchStats, refreshProfile, user?.hasGmailAccess, user?.id]);
 
   const handleProcessAI = async () => {
     try {
       setProcessingAI(true);
-      const response = await emailAPI.aiProcessAll();
-      setNotice({ tone: 'ok', text: response.data.message || 'AI finished processing.' });
-      await Promise.all([fetchEmails(), fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
+      setNotice({ tone: 'ok', text: 'Running full AI intelligence scan...' });
+      await emailAPI.aiProcessAll();
+      await refreshWorkspace();
+      setNotice({ tone: 'ok', text: 'Intelligence scan complete.' });
     } catch (error) {
-      setNotice({ tone: 'warn', text: error.response?.data?.error || 'AI processing failed.' });
+      setNotice({ tone: 'warn', text: 'AI scan failed.' });
     } finally {
       setProcessingAI(false);
     }
@@ -197,15 +144,11 @@ const Dashboard = () => {
   const handleSyncEmails = async () => {
     try {
       setSyncing(true);
-      const response = await emailAPI.syncEmails();
-      setEmails(sortByNewest(response.data.emails || []));
-      setNotice({
-        tone: response.data.degraded ? 'warn' : 'ok',
-        text: response.data.warning || response.data.message || 'Emails synced successfully.',
-      });
-      await Promise.all([fetchStats(), fetchMorningBrief(), fetchAnalytics(), refreshProfile()]);
+      await emailAPI.syncEmails();
+      await refreshWorkspace();
+      setNotice({ tone: 'ok', text: 'Inbox synced successfully.' });
     } catch (error) {
-      setNotice({ tone: 'warn', text: error.response?.data?.error || 'Sync failed.' });
+      setNotice({ tone: 'warn', text: 'Sync failed.' });
     } finally {
       setSyncing(false);
     }
@@ -218,32 +161,20 @@ const Dashboard = () => {
       await refreshProfile();
       setNotice({ tone: response.data.ready ? 'ok' : 'warn', text: response.data.message });
     } catch (error) {
-      setNotice({ tone: 'warn', text: error.response?.data?.error || 'Training failed.' });
+      setNotice({ tone: 'warn', text: 'Training failed.' });
     } finally {
       setTrainingStyle(false);
     }
   };
 
   const actionQueue = emails.filter((email) => email.actionRequired || email.priority === 'high');
-  const pendingTasks = emails
-    .flatMap((email) =>
-      Array.isArray(email.tasks)
-        ? email.tasks.map((task, index) => ({
-          ...task,
-          emailId: email.id,
-          emailSubject: email.subject || 'Untitled email',
-          taskKey: `${email.id}-${task.id || index}`,
-        }))
-        : [],
-    )
-    .filter((task) => !task.completed);
     
   if (loading) {
     return (
       <div className="app-loading-shell">
         <div className="app-loading-card">
           <div className="app-loading-spinner"></div>
-          <p>Loading your progressive dashboard...</p>
+          <p>Analyzing your inbox architecture...</p>
         </div>
       </div>
     );
@@ -253,8 +184,8 @@ const Dashboard = () => {
     <div className="dashboard-shell">
       <div className="page-header" style={{ marginBottom: '2rem' }}>
         <div>
-          <span className="eyebrow">Onboarding Wizard</span>
-          <h1 style={{ fontSize: '2.4rem' }}>EmailFlow AI Setup</h1>
+          <span className="eyebrow">Executive Workspace</span>
+          <h1 style={{ fontSize: '2.4rem' }}>Intelligence Dashboard</h1>
         </div>
         {notice && (
           <div className={`status-pill ${notice.tone === 'ok' ? 'status-ok' : 'status-warn'}`}>
@@ -263,161 +194,165 @@ const Dashboard = () => {
         )}
       </div>
 
+      <div className="bento-grid" style={{ marginBottom: '2rem' }}>
+        <div className="bento-col-4">
+          <div className="surface-card" style={{ padding: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <div className="brand-mark" style={{ background: 'var(--highlight)' }}>Σ</div>
+            <div>
+              <span className="eyebrow">Total Inbox</span>
+              <h2 style={{ fontSize: '1.8rem', margin: 0 }}>{stats.totalEmails || 0}</h2>
+            </div>
+          </div>
+        </div>
+        <div className="bento-col-4">
+          <div className="surface-card" style={{ padding: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <div className="brand-mark" style={{ background: 'var(--danger)' }}>!</div>
+            <div>
+              <span className="eyebrow" style={{ color: 'var(--danger)' }}>Urgent</span>
+              <h2 style={{ fontSize: '1.8rem', margin: 0 }}>{stats.actionRequired || 0}</h2>
+            </div>
+          </div>
+        </div>
+        <div className="bento-col-4">
+          <div className="surface-card" style={{ padding: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <div className="brand-mark" style={{ background: 'var(--success)' }}>✓</div>
+            <div>
+              <span className="eyebrow" style={{ color: 'var(--success)' }}>Processed</span>
+              <h2 style={{ fontSize: '1.8rem', margin: 0 }}>{Math.max(0, stats.totalEmails - stats.unreadCount)}</h2>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         
-        {/* STEP 1: Connect Gmail */}
-        <div className="surface-card" style={{ 
-            opacity: currentStep === 1 ? 1 : 0.6,
-            transform: currentStep === 1 ? 'scale(1)' : 'scale(0.98)',
-            transition: 'all 0.3s ease',
-            border: currentStep === 1 ? '1px solid var(--accent-light)' : '1px solid var(--border)' 
-        }}>
-          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-            <div className="brand-mark" style={{ background: currentStep > 1 ? 'var(--success)' : '' }}>
-              {currentStep > 1 ? '✓' : '1'}
+        {currentStep < 4 && (
+          <div className="surface-card" style={{ border: '1px solid var(--accent)', background: 'rgba(124,58,237,0.05)' }}>
+            <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Complete Your Setup</h2>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+               {currentStep === 1 && <button className="button button-primary" onClick={() => navigate('/auth/gmail-connect')}>Connect Gmail</button>}
+               {currentStep === 2 && <button className="button button-primary" onClick={handleSyncEmails} disabled={syncing}>Sync Inbox</button>}
+               {currentStep === 3 && <button className="button button-primary" onClick={handleTrainStyle} disabled={trainingStyle}>Train AI Voice</button>}
             </div>
-            <div style={{ flex: 1 }}>
-              <h2 style={{ fontSize: '1.3rem', margin: 0 }}>Connect Gmail Account</h2>
-              <p style={{ margin: '0.4rem 0 0', fontSize: '0.9rem' }}>Authorize EmailFlow AI to securely access your inbox for intelligent analysis.</p>
-            </div>
-            {currentStep === 1 ? (
-              <button className="button button-primary" onClick={() => navigate('/auth/gmail-connect')}>
-                Connect Gmail Now
-              </button>
-            ) : (
-              <span className="status-pill status-ok">Connected</span>
-            )}
           </div>
-        </div>
+        )}
 
-        {/* STEP 2: Sync Inbox */}
         <div className="surface-card" style={{ 
-            opacity: currentStep === 2 ? 1 : (currentStep > 2 ? 0.6 : 0.4),
-            pointerEvents: currentStep >= 2 ? 'auto' : 'none',
-            transform: currentStep === 2 ? 'scale(1)' : 'scale(0.98)',
-            transition: 'all 0.3s ease',
-            border: currentStep === 2 ? '1px solid var(--cyan)' : '1px solid var(--border)' 
+            background: 'var(--panel-elevated)', 
+            border: '1px solid var(--border-glow)',
+            padding: '2.5rem',
+            position: 'relative',
+            overflow: 'hidden'
         }}>
-          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-            <div className="brand-mark" style={{ background: currentStep > 2 ? 'var(--success)' : (currentStep === 2 ? 'linear-gradient(135deg, var(--cyan), var(--blue))' : 'var(--muted)') }}>
-              {currentStep > 2 ? '✓' : '2'}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
+            <div>
+              <span className="eyebrow" style={{ color: 'var(--highlight)' }}>Chief of Staff Briefing</span>
+              <h2 style={{ fontSize: '2.2rem', margin: '0.5rem 0' }}>Executive Intelligence</h2>
             </div>
-            <div style={{ flex: 1 }}>
-              <h2 style={{ fontSize: '1.3rem', margin: 0 }}>Sync Your Inbox</h2>
-              <p style={{ margin: '0.4rem 0 0', fontSize: '0.9rem' }}>Pull your recent emails so the AI can build your command center and task lists.</p>
-            </div>
-            {currentStep === 2 ? (
-              <button className="button button-primary" onClick={handleSyncEmails} disabled={syncing}>
-                {syncing ? 'Syncing...' : 'Sync Inbox Now'}
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button className="button button-secondary" onClick={handleProcessAI} disabled={processingAI}>
+                {processingAI ? 'Analyzing...' : '🚀 Refresh Intelligence'}
               </button>
-            ) : currentStep > 2 ? (
-              <button className="button button-ghost" onClick={handleSyncEmails} disabled={syncing}>
-                 {syncing ? 'Syncing...' : 'Resync Data'}
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        {/* STEP 3: Train AI Style */}
-        <div className="surface-card" style={{ 
-            opacity: currentStep === 3 ? 1 : (currentStep > 3 ? 0.6 : 0.4),
-            pointerEvents: currentStep >= 3 ? 'auto' : 'none',
-            transform: currentStep === 3 ? 'scale(1)' : 'scale(0.98)',
-            transition: 'all 0.3s ease',
-            border: currentStep === 3 ? '1px solid var(--accent)' : '1px solid var(--border)' 
-        }}>
-          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-            <div className="brand-mark" style={{ background: currentStep > 3 ? 'var(--success)' : (currentStep === 3 ? 'linear-gradient(135deg, var(--accent), var(--pink))' : 'var(--muted)') }}>
-              {currentStep > 3 ? '✓' : '3'}
+              {inboxSummary?.priority && (
+                <span className={`status-pill ${inboxSummary.priority === 'high' ? 'status-warn' : 'status-ok'}`} style={{ fontSize: '1rem' }}>
+                  Urgency: {inboxSummary.priority.toUpperCase()}
+                </span>
+              )}
             </div>
-            <div style={{ flex: 1 }}>
-              <h2 style={{ fontSize: '1.3rem', margin: 0 }}>Train AI Writing Style</h2>
-              <p style={{ margin: '0.4rem 0 0', fontSize: '0.9rem' }}>Let the AI analyze your sent emails so it can draft replies perfectly in your voice.</p>
-            </div>
-            {currentStep === 3 ? (
-              <button className="button button-primary" onClick={handleTrainStyle} disabled={trainingStyle}>
-                {trainingStyle ? 'Training...' : 'Train AI Now'}
-              </button>
-            ) : currentStep > 3 ? (
-               <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                 <span className="status-pill status-ok">Style: {user?.style?.tone || 'Trained'}</span>
-                 <button className="button button-ghost" onClick={handleTrainStyle} disabled={trainingStyle}>
-                   Retrain
-                 </button>
-               </div>
-            ) : null}
-          </div>
-        </div>
-
-        {/* STEP 4: AI Command Center (Unlocked state) */}
-        <div className="surface-card" style={{ 
-            opacity: currentStep === 4 ? 1 : 0.4,
-            pointerEvents: currentStep >= 4 ? 'auto' : 'none',
-            transform: currentStep === 4 ? 'scale(1)' : 'scale(0.98)',
-            transition: 'all 0.3s ease',
-            background: currentStep === 4 ? 'linear-gradient(135deg, rgba(124,58,237,0.1) 0%, rgba(6,182,212,0.1) 100%)' : 'var(--panel)',
-            border: currentStep === 4 ? '1px solid var(--border-glow)' : '1px solid var(--border)',
-            marginTop: '1.5rem'
-        }}>
-          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '1.5rem', marginBottom: '1.5rem' }}>
-             <div className="brand-mark" style={{ background: currentStep === 4 ? 'linear-gradient(135deg, var(--highlight), var(--cyan))' : 'var(--muted)' }}>
-              4
-            </div>
-            <div style={{ flex: 1 }}>
-              <h2 style={{ fontSize: '1.8rem', margin: 0 }}>AI Command Center</h2>
-              <p style={{ margin: '0.4rem 0 0', fontSize: '1rem', color: 'var(--text-dim)' }}>Your inbox is fully optimized. Here is your executive summary and urgent tasks.</p>
-            </div>
-            <button className="button button-secondary" onClick={handleProcessAI} disabled={processingAI || currentStep < 4}>
-               {processingAI ? 'Processing...' : 'Run AI Analysis'}
-            </button>
           </div>
 
-          {currentStep === 4 && (
-             <div className="bento-grid">
-               {/* AI Inbox Summary */}
-               <div className="bento-col-12">
-                 <div className="auth-card-spotlight" style={{ padding: '1.5rem', borderRadius: 'var(--radius-lg)' }}>
-                    <span className="eyebrow">Groq AI Executive Summary</span>
-                    <p style={{ fontSize: '1.1rem', lineHeight: '1.6', marginTop: '1rem', color: 'var(--text)' }}>
-                      {loadingSummary ? 'Synthesizing inbox...' : (inboxSummary?.summary || 'No summary available yet.')}
-                    </p>
-                 </div>
-               </div>
+          {loadingSummary ? (
+            <div style={{ padding: '4rem 0', textAlign: 'center' }}>
+              <div className="app-loading-spinner" style={{ margin: '0 auto 1.5rem' }}></div>
+              <p style={{ color: 'var(--highlight)', fontWeight: 600 }}>Synthesizing production-level briefing...</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
+              
+              <div style={{ padding: '1.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-lg)', borderLeft: '5px solid var(--highlight)' }}>
+                <h3 style={{ fontSize: '1rem', color: 'var(--highlight)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.8rem' }}>📌 Executive Summary</h3>
+                <p style={{ fontSize: '1.25rem', lineHeight: '1.7', color: 'var(--text)', fontWeight: 400 }}>
+                  {inboxSummary?.executive_summary || 'Synchronizing with your latest communications...'}
+                </p>
+              </div>
 
-               {/* Urgent Actions */}
-               <div className="bento-col-6">
-                 <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '1.5rem', borderRadius: 'var(--radius-lg)' }}>
-                    <span className="eyebrow" style={{ color: 'var(--danger)' }}>🚨 Urgent Queue</span>
-                    <h3 style={{ margin: '0.5rem 0 1rem' }}>{actionQueue.length} Action Items</h3>
-                    <div className="stack-list">
-                      {actionQueue.slice(0, 3).map(email => (
-                         <EmailCard key={email.id} email={email} compact onUpdate={fetchEmails} />
-                      ))}
-                      {actionQueue.length === 0 && <p style={{ fontSize: '0.9rem', color: 'var(--muted)' }}>No urgent emails detected.</p>}
-                    </div>
-                 </div>
-               </div>
+              <div className="bento-grid">
+                
+                <div className="bento-col-4">
+                  <h3 style={{ fontSize: '0.9rem', color: 'var(--indigo)', marginBottom: '1rem', textTransform: 'uppercase' }}>📢 Key Updates</h3>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                    {(inboxSummary?.key_updates || []).map((update, i) => (
+                      <li key={i} style={{ display: 'flex', gap: '0.8rem', fontSize: '0.95rem', color: 'var(--text-dim)' }}>
+                        <span style={{ color: 'var(--indigo)' }}>•</span> {update}
+                      </li>
+                    ))}
+                    {(!inboxSummary?.key_updates?.length) && <li style={{ color: 'var(--muted)' }}>No recent updates.</li>}
+                  </ul>
+                </div>
 
-               {/* Task Board */}
-               <div className="bento-col-6">
-                 <div style={{ background: 'rgba(6, 182, 212, 0.05)', border: '1px solid rgba(6, 182, 212, 0.2)', padding: '1.5rem', borderRadius: 'var(--radius-lg)' }}>
-                    <span className="eyebrow" style={{ color: 'var(--cyan)' }}>✅ Extracted Tasks</span>
-                    <h3 style={{ margin: '0.5rem 0 1rem' }}>{pendingTasks.length} Pending Tasks</h3>
-                    <div className="stack-list">
-                      {pendingTasks.slice(0, 3).map(task => (
-                        <div key={task.taskKey} style={{ background: 'rgba(0,0,0,0.3)', padding: '0.8rem', borderRadius: 'var(--radius-sm)' }}>
-                          <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{task.task}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.3rem' }}>From: {task.emailSubject}</div>
-                        </div>
-                      ))}
-                      {pendingTasks.length === 0 && <p style={{ fontSize: '0.9rem', color: 'var(--muted)' }}>No tasks pending.</p>}
-                    </div>
-                 </div>
-               </div>
+                <div className="bento-col-4">
+                  <h3 style={{ fontSize: '0.9rem', color: 'var(--cyan)', marginBottom: '1rem', textTransform: 'uppercase' }}>🔥 Critical Actions</h3>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                    {(inboxSummary?.critical_actions || []).map((action, i) => (
+                      <li key={i} style={{ display: 'flex', gap: '0.8rem', fontSize: '0.95rem', color: 'var(--text)' }}>
+                        <span style={{ color: 'var(--cyan)' }}>→</span> {action}
+                      </li>
+                    ))}
+                    {(!inboxSummary?.critical_actions?.length) && <li style={{ color: 'var(--muted)' }}>Zero urgent actions.</li>}
+                  </ul>
+                </div>
 
-             </div>
+                <div className="bento-col-4">
+                  <h3 style={{ fontSize: '0.9rem', color: 'var(--danger)', marginBottom: '1rem', textTransform: 'uppercase' }}>⚠️ Risks</h3>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.8rem', marginBottom: '2rem' }}>
+                    {(inboxSummary?.risks || []).map((risk, i) => (
+                      <li key={i} style={{ display: 'flex', gap: '0.8rem', fontSize: '0.95rem', color: 'var(--danger)' }}>
+                        <span>⚠</span> {risk}
+                      </li>
+                    ))}
+                    {(!inboxSummary?.risks?.length) && <li style={{ color: 'var(--muted)' }}>No risks detected.</li>}
+                  </ul>
+
+                  <h3 style={{ fontSize: '0.9rem', color: 'var(--success)', marginBottom: '1rem', textTransform: 'uppercase' }}>📊 Insights</h3>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.8rem', marginBottom: '2rem' }}>
+                    {(inboxSummary?.insights || []).map((insight, i) => (
+                      <li key={i} style={{ fontSize: '0.9rem', color: 'var(--success)', fontStyle: 'italic' }}>
+                        {insight}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <h3 style={{ fontSize: '0.9rem', color: 'var(--highlight)', marginBottom: '1rem', textTransform: 'uppercase' }}>🧠 AI Recommendations</h3>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                    {(inboxSummary?.recommendations || []).map((rec, i) => (
+                      <li key={i} style={{ fontSize: '0.95rem', color: 'var(--highlight)', fontWeight: 500 }}>
+                        ✨ {rec}
+                      </li>
+                    ))}
+                    {(!inboxSummary?.recommendations?.length) && <li style={{ color: 'var(--muted)' }}>No recommendations yet.</li>}
+                  </ul>
+                </div>
+
+              </div>
+            </div>
           )}
         </div>
+
+        {actionQueue.length > 0 && (
+          <div className="surface-card">
+             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+               <h3 style={{ fontSize: '1.3rem' }}>🚨 Urgent Response Required</h3>
+               <button className="button button-ghost" onClick={() => navigate('/inbox?priority=high')}>View All</button>
+             </div>
+             <div className="bento-grid">
+               {actionQueue.slice(0, 3).map(email => (
+                 <div key={email.id} className="bento-col-4">
+                   <EmailCard email={email} compact onUpdate={fetchEmails} />
+                 </div>
+               ))}
+             </div>
+          </div>
+        )}
 
       </div>
     </div>

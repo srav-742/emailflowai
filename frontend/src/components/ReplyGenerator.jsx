@@ -3,6 +3,7 @@ import { emailAPI } from '../services/api';
 
 const ReplyGenerator = ({ email, onClose, onSent }) => {
   const [tone, setTone] = useState('professional');
+  const [intent, setIntent] = useState('general');
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState('');
@@ -13,12 +14,15 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
 
   const normalizeReply = (value = '') => String(value).replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
 
-  const handleGenerateReply = async () => {
+  const handleGenerateReply = async (selectedIntent = intent) => {
     try {
       setGenerating(true);
       setStatus('');
-      const response = await emailAPI.aiGenerateReply(email.id, tone);
+      setIntent(selectedIntent);
+      
+      const response = await emailAPI.aiGenerateReply(email.id, tone, selectedIntent);
       const generatedReply = response.data.reply;
+      
       setReply(generatedReply);
       setEditedReply(generatedReply);
       setStyleProfile(response.data.style || null);
@@ -44,13 +48,9 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
         generatedReply: reply,
         wasEdited,
       });
-      if (onSent) {
-        await onSent();
-      }
+      if (onSent) await onSent();
       setStatus('Reply sent successfully.');
-      setTimeout(() => {
-        onClose();
-      }, 900);
+      setTimeout(onClose, 900);
     } catch (error) {
       console.error('Reply send error:', error);
       setStatus('Reply could not be sent. Please try again.');
@@ -60,171 +60,80 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
   };
 
   return (
-    <div className="reply-panel">
-      <div className="reply-panel-header">
+    <div className="reply-panel" style={{ background: 'var(--panel-elevated)', border: '1px solid var(--border-glow)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', marginTop: '1rem' }}>
+      <div className="reply-panel-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
         <div>
-          <span className="eyebrow">AI reply studio</span>
-          <h4>{email.subject || 'Draft reply'}</h4>
+          <span className="eyebrow" style={{ color: 'var(--highlight)' }}>AI Reply Studio</span>
+          <h4 style={{ margin: '0.3rem 0' }}>{email.subject || 'Drafting Reply'}</h4>
         </div>
-        <button className="button button-ghost" onClick={onClose}>
-          Close
-        </button>
+        <button className="button button-ghost" onClick={onClose}>✕</button>
       </div>
 
-      <div className="reply-toolbar">
-        <label className="tone-field">
-          Tone
-          <select value={tone} onChange={(event) => setTone(event.target.value)}>
-            <option value="professional">Professional</option>
-            <option value="casual">Casual</option>
-            <option value="friendly">Friendly</option>
-            <option value="formal">Formal</option>
-          </select>
-        </label>
+      <div className="reply-toolbar" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+          <label className="tone-field" style={{ flex: 1 }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginBottom: '0.4rem' }}>Response Tone</span>
+            <select value={tone} onChange={(e) => setTone(e.target.value)} style={{ width: '100%', padding: '0.6rem', borderRadius: 'var(--radius-sm)', background: 'var(--input)', border: '1px solid var(--border)' }}>
+              <option value="professional">💼 Professional</option>
+              <option value="friendly">😊 Friendly</option>
+              <option value="casual">☕ Casual</option>
+              <option value="formal">👔 Formal</option>
+              <option value="short">⚡ Short & Concise</option>
+            </select>
+          </label>
+          <button className="button button-primary" onClick={() => handleGenerateReply()} disabled={generating} style={{ height: '2.5rem' }}>
+            {generating ? '✨ Generating...' : '🤖 Generate Default'}
+          </button>
+        </div>
 
-        <button className="button button-primary" onClick={handleGenerateReply} disabled={generating}>
-          {generating ? 'Generating...' : 'Generate draft'}
-        </button>
+        <div>
+          <span style={{ fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginBottom: '0.6rem' }}>One-Click Smart Intents</span>
+          <div style={{ display: 'flex', gap: '0.6rem' }}>
+            <button className="button button-ghost" onClick={() => handleGenerateReply('accept')} disabled={generating} style={{ borderColor: 'var(--success)', color: 'var(--success)' }}>✅ Accept / Yes</button>
+            <button className="button button-ghost" onClick={() => handleGenerateReply('negotiate')} disabled={generating} style={{ borderColor: 'var(--cyan)', color: 'var(--cyan)' }}>🕒 Ask for Time / Info</button>
+            <button className="button button-ghost" onClick={() => handleGenerateReply('decline')} disabled={generating} style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>❌ Decline / No</button>
+          </div>
+        </div>
       </div>
 
-      {styleProfile?.ready ? (
-        <div className="inline-alert">
-          Writing in your voice: {styleProfile.tone}, {styleProfile.sentenceLength} sentences, {styleProfile.signatureStyle}.
+      {styleProfile?.ready && (
+        <div className="inline-alert" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>
+          Mimicking your voice: <strong>{styleProfile.tone}</strong> tone, <strong>{styleProfile.sentenceLength}</strong> sentences.
         </div>
-      ) : null}
+      )}
 
-      {!!(reply || editedReply) && (
-        <div className="reply-editor">
-          <div className="reply-editor-top">
-            <strong>{editing ? 'Editing draft' : 'Generated draft'}</strong>
+      {(reply || editedReply) && (
+        <div className="reply-editor" style={{ background: 'rgba(0,0,0,0.2)', padding: '1.2rem', borderRadius: 'var(--radius-md)' }}>
+          <div className="reply-editor-top" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+            <strong>{editing ? '✍️ Editing Draft' : '🤖 AI Suggestion'}</strong>
             <div className="button-row">
-              {!editing && (
-                <button className="button button-ghost" onClick={() => setEditing(true)}>
-                  Edit
-                </button>
-              )}
-              <button className="button button-ghost" onClick={handleCopyToClipboard}>
-                Copy
-              </button>
+              {!editing && <button className="button button-ghost" onClick={() => setEditing(true)}>Edit</button>}
+              <button className="button button-ghost" onClick={handleCopyToClipboard}>Copy</button>
             </div>
           </div>
 
           {editing ? (
-            <textarea className="reply-textarea" value={editedReply} onChange={(event) => setEditedReply(event.target.value)} rows={8} />
+            <textarea className="reply-textarea" value={editedReply} onChange={(e) => setEditedReply(e.target.value)} rows={8} style={{ width: '100%', background: 'transparent', border: '1px solid var(--highlight)', color: 'var(--text)', padding: '1rem', borderRadius: 'var(--radius-sm)' }} />
           ) : (
-            <div className="reply-preview">
-              {(editedReply || reply).split('\n').map((line, index) => (
-                <p key={`${line}-${index}`}>{line || '\u00A0'}</p>
-              ))}
+            <div className="reply-preview" style={{ whiteSpace: 'pre-line', lineHeight: '1.6', fontSize: '1rem', color: 'var(--text)' }}>
+              {editedReply || reply}
             </div>
           )}
 
-          {editing && (
-            <div className="button-row">
-              <button className="button button-secondary" onClick={() => setEditing(false)}>
-                Save draft
-              </button>
-              <button
-                className="button button-ghost"
-                onClick={() => {
-                  setEditing(false);
-                  setEditedReply(reply);
-                }}
-              >
-                Revert
-              </button>
-            </div>
-          )}
-
-          <button className="button button-primary button-full" onClick={handleSend} disabled={sending}>
-            {sending ? 'Sending reply...' : 'Send with Gmail'}
-          </button>
-        </div>
-      )}
-
-      {status && <div className="inline-alert">{status}</div>}
-    </div>
-  );
-
-  /*
-  return (
-    <div className="reply-generator">
-      <div className="reply-header">
-        <h3>✍️ AI Reply Generator</h3>
-        <button className="close-btn" onClick={onClose}>✕</button>
-      </div>
-
-      <div className="reply-controls">
-        <label className="tone-selector">
-          <span>Tone:</span>
-          <select value={tone} onChange={(e) => setTone(e.target.value)}>
-            <option value="professional">Professional</option>
-            <option value="casual">Casual</option>
-            <option value="friendly">Friendly</option>
-            <option value="formal">Formal</option>
-          </select>
-        </label>
-
-        <button 
-          className="generate-btn" 
-          onClick={handleGenerateReply}
-          disabled={generating}
-        >
-          {generating ? '⏳ Generating...' : '🤖 Generate Reply'}
-        </button>
-      </div>
-
-      {reply && (
-        <div className="reply-content">
-          <div className="reply-label">
-            <span>Generated Reply {editing ? '(Editing)' : ''}</span>
-            <div className="reply-actions">
-              {!editing && (
-                <button className="edit-btn" onClick={() => setEditing(true)}>
-                  ✏️ Edit
-                </button>
-              )}
-              <button className="copy-btn" onClick={handleCopyToClipboard}>
-                📋 Copy
-              </button>
-            </div>
+          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
+            <button className="button button-primary" onClick={handleSend} disabled={sending} style={{ flex: 1 }}>
+              {sending ? '🚀 Sending...' : '📤 Send with Gmail'}
+            </button>
+            {editing && (
+              <button className="button button-secondary" onClick={() => setEditing(false)}>Save Draft</button>
+            )}
           </div>
-
-          {editing ? (
-            <textarea
-              className="reply-textarea"
-              value={editedReply}
-              onChange={(e) => setEditedReply(e.target.value)}
-              rows={8}
-            />
-          ) : (
-            <div className="reply-text">
-              <p>{editedReply || reply}</p>
-            </div>
-          )}
-
-          {editing && (
-            <div className="edit-actions">
-              <button className="save-btn" onClick={() => setEditing(false)}>
-                💾 Save Changes
-              </button>
-              <button className="cancel-btn" onClick={() => {
-                setEditing(false);
-                setEditedReply(reply);
-              }}>
-                Cancel
-              </button>
-            </div>
-          )}
-
-          <button className="send-btn" onClick={handleSend}>
-            📤 Ready to Send
-          </button>
         </div>
       )}
+
+      {status && <div className={`status-pill ${status.includes('successfully') ? 'status-ok' : 'status-warn'}`} style={{ marginTop: '1rem' }}>{status}</div>}
     </div>
   );
-  */
 };
 
 export default ReplyGenerator;

@@ -264,25 +264,24 @@ function generateSummary(subject = '', snippet = '', body = '') {
   
   // 1. Core Message
   if (leadSentence) {
-    parts.push(`Topic: ${summarizeText(leadSentence, 150)}`);
+    parts.push(`OVERVIEW: ${summarizeText(leadSentence, 150)}`);
   } else if (normalizedSubject) {
-    parts.push(`Topic: ${summarizeText(normalizedSubject, 150)}`);
+    parts.push(`OVERVIEW: ${summarizeText(normalizedSubject, 150)}`);
   }
   
   // 2. Action Required
   if (actionSentence && !parts.join(' ').toLowerCase().includes(actionSentence.toLowerCase())) {
-    parts.push(`Action Required: ${summarizeText(actionSentence, 110)}`);
+    parts.push(`ACTION: ${summarizeText(actionSentence, 110)}`);
   } else if (REQUEST_PATTERN.test(primaryText)) {
-     // If we couldn't find a clean sentence but there's a request pattern
-     parts.push(`Action Required: Yes (review for details)`);
+     parts.push(`ACTION: Review needed (requests detected)`);
   }
   
   // 3. Deadline
   if (deadline) {
-    parts.push(`Deadline: ${deadline}`);
+    parts.push(`TIMELINE: ${deadline}`);
   }
 
-  return parts.filter(Boolean).join(' | ') || 'No content available';
+  return parts.filter(Boolean).join('\n') || 'No content analysis available';
 }
 
 function analyzeEmailIntelligence({ subject = '', body = '', snippet = '', sender = '', labelIds = [] }) {

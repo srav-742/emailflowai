@@ -1,7 +1,6 @@
 /**
  * AI utilities powered by Groq (llama-3.3-70b-versatile).
- * Groq uses an OpenAI-compatible REST API, so we use axios directly.
- * All exports are identical to the previous xai.js so no downstream changes are needed.
+ * FINAL DECISION GRADE: Chief of Staff Intelligence (DECISIVE, SPECIFIC, ZERO-FILLER).
  */
 
 const axios = require('axios');
@@ -11,14 +10,14 @@ const GROQ_API_KEY  = process.env.GROQ_API_KEY;
 const GROQ_MODEL    = process.env.GROQ_MODEL    || 'llama-3.3-70b-versatile';
 const GROQ_API_URL  = process.env.GROQ_API_URL  || 'https://api.groq.com/openai/v1/chat/completions';
 
-// Re-export XAI_MODEL as an alias so server.js / other files still work
 const XAI_MODEL = GROQ_MODEL;
 
-const DEFAULT_COOLDOWN_MS            = 2  * 60 * 1000;  // 2 min on rate-limit
-const DEFAULT_PERMISSION_COOLDOWN_MS = 30 * 60 * 1000;  // 30 min on auth error
+const DEFAULT_COOLDOWN_MS            = 2  * 60 * 1000;
+const MAX_COOLDOWN_MS                = 15 * 60 * 1000;
 
 let cooldownUntil = 0;
-let cooldownReason = null;
+
+const batchSummaryCache = new Map();
 
 // ─── Low-level HTTP client ─────────────────────────────────────────────────
 
@@ -28,7 +27,6 @@ const groqClient = axios.create({
   timeout:  30000,
 });
 
-// Read the API key dynamically on every request so it's always current
 groqClient.interceptors.request.use((config) => {
   const key = process.env.GROQ_API_KEY;
   if (key) config.headers.Authorization = `Bearer ${key}`;
@@ -58,38 +56,11 @@ function parseRetryAfterMs(message = '') {
   return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
-function getGroqErrorMessage(error) {
-  return (
-    error?.response?.data?.error?.message ||
-    error?.response?.data?.error ||
-    error?.response?.data?.message ||
-    error?.message ||
-    ''
-  );
-}
-
 function isGroqRateLimitError(error) {
-  const status  = Number(error?.response?.status || 0);
-  const code    = String(error?.response?.data?.error?.code || '').toLowerCase();
-  const message = getGroqErrorMessage(error).toLowerCase();
-  return status === 429 || code === 'rate_limit_exceeded' || message.includes('rate limit');
+  const status = Number(error?.response?.status || 0);
+  const message = (error?.response?.data?.error?.message || '').toLowerCase();
+  return status === 429 || message.includes('rate limit');
 }
-
-function isGroqCreditsOrPermissionError(error) {
-  const status  = Number(error?.response?.status || 0);
-  const code    = String(error?.response?.data?.error?.code || '').toLowerCase();
-  const message = getGroqErrorMessage(error).toLowerCase();
-  return (
-    status === 401 || status === 403 ||
-    code === 'permission_denied' || code === 'insufficient_credits' || code === 'unauthorized' ||
-    message.includes('permission') || message.includes('credit') || message.includes('license')
-  );
-}
-
-// Keep legacy names exported for files that import them directly
-const isXAIRateLimitError            = isGroqRateLimitError;
-const isXAICreditsOrPermissionError  = isGroqCreditsOrPermissionError;
-const getXAIErrorMessage             = getGroqErrorMessage;
 
 function parseEmailContent(emailContent = '') {
   const subjectMatch = String(emailContent).match(/Subject:\s*(.+)/i);
@@ -103,392 +74,401 @@ function parseEmailContent(emailContent = '') {
   };
 }
 
-function normalizePriority(value, fallback = 'medium') {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'normal') return 'medium';
-  return ['low', 'medium', 'high'].includes(normalized) ? normalized : fallback;
-}
-
-function parseClassificationResponse(value) {
-  const match = extractJsonBlock(value, 'object');
-  if (!match) return null;
-  try {
-    const parsed = JSON.parse(match);
-    return {
-      category:       parsed.category || 'general',
-      priority:       normalizePriority(parsed.priority, 'medium'),
-      labels:         Array.isArray(parsed.labels) ? parsed.labels : [],
-      actionRequired: Boolean(parsed.actionRequired || parsed.action_required),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function fallbackAnalysis(emailContent) {
-  const parsed   = parseEmailContent(emailContent);
-  const fallback = analyzeEmailIntelligence({ subject: parsed.subject, snippet: parsed.body, body: parsed.body, sender: parsed.sender });
-  return { ...fallback, priority: normalizePriority(fallback.priority, 'medium') };
-}
-
-function fallbackStyleProfile(samples = []) {
-  const avg = samples.length ? samples.reduce((t, s) => t + s.length, 0) / samples.length : 0;
-  return {
-    tone:            avg > 420 ? 'formal' : avg > 220 ? 'friendly' : 'casual',
-    greetingStyle:   avg > 220 ? 'Warm greeting with recipient name when available' : 'Short greeting',
-    signatureStyle:  avg > 220 ? 'Polite sign-off with name' : 'Minimal sign-off',
-    sentenceLength:  avg > 520 ? 'long' : avg > 220 ? 'medium' : 'short',
-    commonPhrases:   [],
-    styleSummary:    avg > 420 ? 'Structured and polished' : avg > 220 ? 'Friendly and concise' : 'Direct and efficient',
-    ready:           samples.length >= 5,
-    minSamples:      5,
-    sampleCount:     samples.length,
-  };
-}
-
-// ─── Core request wrapper ──────────────────────────────────────────────────
-
 async function requestGroq(messages, overrides = {}) {
-  if (!GROQ_API_KEY) {
-    console.warn('[Groq] GROQ_API_KEY is not set — falling back to local intelligence.');
-    return null;
-  }
-
-  if (cooldownUntil > Date.now()) {
-    return null;
-  }
-
-  if (cooldownUntil && cooldownUntil <= Date.now()) {
-    cooldownUntil  = 0;
-    cooldownReason = null;
-  }
+  if (!GROQ_API_KEY) return null;
+  if (cooldownUntil > Date.now()) return null;
 
   try {
     const response = await groqClient.post('', {
       model:       GROQ_MODEL,
       messages,
-      max_tokens:  overrides.maxTokens  ?? 500,
+      max_tokens:  overrides.maxTokens  ?? 1200,
       temperature: overrides.temperature ?? 0.1,
     });
-
     return response.data?.choices?.[0]?.message?.content?.trim() ?? null;
   } catch (error) {
-    const isRate   = isGroqRateLimitError(error);
-    const isPerms  = isGroqCreditsOrPermissionError(error);
-
-    if (isRate || isPerms) {
-      const retryAfterMs = isPerms
-        ? DEFAULT_PERMISSION_COOLDOWN_MS
-        : parseRetryAfterMs(getGroqErrorMessage(error)) || DEFAULT_COOLDOWN_MS;
-
-      const nextUntil  = Date.now() + retryAfterMs;
-      const nextReason = isPerms ? 'no-credits' : 'rate-limit';
-      const shouldLog  = nextUntil > cooldownUntil || nextReason !== cooldownReason;
-
-      cooldownUntil  = nextUntil;
-      cooldownReason = nextReason;
-
-      if (shouldLog) {
-        if (isPerms) {
-          console.warn(`[Groq] Auth/credit error — cooling down for ${Math.round(retryAfterMs / 60000)} min. Falling back to local intelligence.`);
-        } else {
-          console.warn(`[Groq] Rate-limited — cooling down until ${new Date(cooldownUntil).toLocaleTimeString()}. Falling back to local intelligence.`);
-        }
-      }
-      return null;
+    if (isGroqRateLimitError(error)) {
+      let retry = parseRetryAfterMs(error?.response?.data?.error?.message) || DEFAULT_COOLDOWN_MS;
+      if (retry > MAX_COOLDOWN_MS) retry = MAX_COOLDOWN_MS;
+      cooldownUntil = Date.now() + retry;
     }
-
-    const msg = getGroqErrorMessage(error);
-    console.error('[Groq] Unexpected error:', msg || error.message);
-    return null;   // graceful fallback on any other error
+    return null;
   }
 }
 
-// Keep legacy alias
-const requestXAI = requestGroq;
-
-// ─── Email Summarization ───────────────────────────────────────────────────
-
-const summarizeEmail = async (emailContent, subject = '') => {
-  const parsed          = parseEmailContent(emailContent);
-  const fallbackSummary = generateSummary(subject || parsed.subject, parsed.body || emailContent, parsed.body || emailContent);
-
-  try {
-    const content = await requestGroq(
-      [
-        {
-          role: 'system',
-          content: `You are an expert executive assistant. Your goal is to provide a "perfect" summary that allows the user to understand the entire context and implications of an email without reading the original text.
-          
-STRUCTURE YOUR SUMMARY AS FOLLOWS:
-1. THE CORE MESSAGE: What is this email about? (1 sentence)
-2. KEY DETAILS: What are the most important facts, numbers, or decisions mentioned?
-3. ACTION ITEMS: What does the sender expect from the user? Or what is the next step?
-4. DEADLINES: Are there any specific dates or times mentioned?
-
-Keep the total length between 2-4 sentences. Be direct, clear, and high-signal.`,
-        },
-        {
-          role: 'user',
-          content: `Summarize this email:\n\nSubject: ${subject}\n\nContent:\n${truncateForPrompt(emailContent)}`,
-        },
-      ],
-      { maxTokens: 200, temperature: 0.3 },
-    );
-
-    return content || fallbackSummary;
-  } catch {
-    return fallbackSummary;
-  }
-};
-
-// ─── Email Classification ──────────────────────────────────────────────────
-
-const classifyEmail = async (emailContent) => {
-  const fallback = fallbackAnalysis(emailContent);
-
-  try {
-    const content = await requestGroq(
-      [
-        {
-          role: 'system',
-          content: 'You are an advanced email classifier. Return ONLY valid JSON. No markdown, no commentary.',
-        },
-        {
-          role: 'user',
-          content: `Classify this email into the most appropriate category based on its intent.
-
-CATEGORIES & DEFINITIONS:
-- finance: Invoices, receipts, bank statements, payments, tax, salary.
-- developer: GitHub/GitLab, deployments, API keys, bug reports, server logs, tech updates.
-- meetings: Calendar invites, scheduling, agendas, Zoom/Teams links.
-- clients: Proposals, contracts, customer support, sales inquiries.
-- operations: Workflow updates, internal reports, maintenance, approvals.
-- legal: NDAs, terms of service, privacy policies, compliance.
-- hr: Hiring, interviews, benefits, payroll, leave requests.
-- travel: Flight/hotel bookings, itineraries, rental cars.
-- newsletter: Marketing, blog updates, weekly digests, promotions.
-- social: LinkedIn, Twitter/X, community forums, friend requests.
-- general: Personal notes, miscellaneous, or anything that doesn't fit above.
-
-PRIORITY DEFINITIONS:
-- high: Urgent requests, production outages, same-day deadlines.
-- normal: Standard business communication, replies needed in 1-2 days.
-- low: Informational, FYI, newsletters, non-urgent updates.
-
-Return ONLY this JSON:
-{
-  "category": "category_name",
-  "priority": "high | normal | low",
-  "labels": ["Short", "Descriptive", "Tags"],
-  "actionRequired": true|false
-}
-
-Email:
-${truncateForPrompt(emailContent)}`,
-        },
-      ],
-      { maxTokens: 180, temperature: 0.1 },
-    );
-
-    const parsed = content ? parseClassificationResponse(content) : null;
-    return parsed || fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-// ─── Batch Inbox Summary (NEW — core feature) ─────────────────────────────
+// ─── Chief of Staff Intelligence ───────────────────────────────────────────
 
 /**
- * Given an array of emails, ask Groq to produce ONE consolidated summary
- * covering all of them: themes, highlights, urgencies, and recommended actions.
- *
- * @param {Array<{subject: string, sender: string, snippet: string, category: string, priority: string}>} emails
- * @returns {Promise<string>}
+ * FINAL UPGRADE: Deep cleaning and deduplication.
  */
-const summarizeBatchEmails = async (emails = []) => {
-  if (!emails.length) return 'No emails to summarize.';
+function getCleanFilteredEmails(emails = []) {
+  const ignoreWords = ["unsubscribe", "sale", "offer", "discount", "joke", "meme", "neighbor crush"];
+  
+  // 1. Remove obvious noise and empty emails
+  const filtered = emails
+    .filter(e => e.subject?.trim() && (e.body?.trim() || e.snippet?.trim()))
+    .filter(e => {
+      const text = (e.subject + ' ' + (e.body || e.snippet || '')).toLowerCase();
+      return !ignoreWords.some(word => text.includes(word));
+    });
 
-  // Build a numbered list of emails for the prompt
-  const emailList = emails
-    .slice(0, 20) // cap to avoid token overflow
-    .map((e, i) => {
-      const priority = (e.priority || 'normal').toUpperCase();
-      const subject  = e.subject  || 'No Subject';
-      const from     = e.senderName || e.sender || 'Unknown';
-      const category = e.category  || 'general';
-      const body     = truncateForPrompt(e.summary || e.snippet || '', 180);
-      return `${i + 1}. [${priority}] ${subject} — from ${from} | ${category}\n   ${body}`;
-    })
-    .join('\n\n');
+  // 2. Remove duplicate subject lines (Deduplication)
+  const uniqueEmails = Array.from(
+    new Map(filtered.map(e => [e.subject.trim().toLowerCase(), e])).values()
+  );
 
-  // Build a meaningful fallback without Groq
-  const categories = [...new Set(emails.map((e) => e.category || 'general'))];
-  const highCount  = emails.filter((e) => e.priority === 'high').length;
-  const fallback   = [
-    `You have ${emails.length} email(s) in your inbox.`,
-    highCount > 0 ? `${highCount} are marked high priority and may need your attention.` : '',
-    `Topics include: ${categories.join(', ')}.`,
-  ].filter(Boolean).join(' ');
-
-  if (!GROQ_API_KEY) {
-    console.warn('[Groq] GROQ_API_KEY not set — returning fallback summary.');
-    return fallback;
-  }
-
-  try {
-    console.log(`[Groq] Generating batch summary for ${emails.length} email(s)...`);
-    const content = await requestGroq(
-      [
-        {
-          role: 'system',
-          content:
-            'You are EmailFlowAI, an intelligent inbox assistant. When given a batch of emails, produce a single concise executive summary (3–5 sentences max). Highlight the most urgent items, key themes, and one clear recommended next action. Sound calm, professional, and helpful.',
-        },
-        {
-          role: 'user',
-          content: `Here are the latest ${emails.length} email(s) in my inbox:\n\n${emailList}\n\nWrite a smart summary of what is happening and what I should focus on first.`,
-        },
-      ],
-      { maxTokens: 400, temperature: 0.4 },
-    );
-
-    if (content) {
-      console.log('[Groq] Batch summary generated successfully.');
-      return content;
-    }
-
-    console.warn('[Groq] Batch summary returned empty — using fallback.');
-    return fallback;
-  } catch (err) {
-    console.error('[Groq] Batch summary error:', err.message);
-    return fallback;
-  }
-};
-
-// ─── Writing Style Analysis ────────────────────────────────────────────────
-
-const analyzeWritingStyle = async (samples = []) => {
-  const fallback = fallbackStyleProfile(samples);
-
-  if (!samples.length) return fallback;
-
-  try {
-    const content = await requestGroq(
-      [
-        {
-          role: 'system',
-          content: "Analyze a person's writing style from sent emails. Return ONLY valid JSON, no markdown.",
-        },
-        {
-          role: 'user',
-          content: `Analyze the user's email writing style.
-
-Return this JSON:
-{
-  "tone": "formal | casual | friendly | direct",
-  "greetingStyle": "how the user usually opens emails",
-  "signatureStyle": "how the user usually signs off",
-  "sentenceLength": "short | medium | long",
-  "commonPhrases": ["phrase 1", "phrase 2"],
-  "styleSummary": "one sentence summary of the user's voice"
+  // 3. Format for AI consumption
+  return uniqueEmails.map(e => ({
+    from: e.senderName || e.sender || 'Unknown',
+    subject: e.subject.trim(),
+    content: truncateForPrompt(e.body || e.snippet || '', 300)
+  }));
 }
 
-Sent emails:
-${truncateForPrompt(samples.join('\n\n---\n\n'), 4000)}`,
-        },
-      ],
-      { maxTokens: 200, temperature: 0.1 },
-    );
+/**
+ * FINAL DECISION GRADE: Chief of Staff Intelligence
+ */
+const summarizeBatchEmails = async (emails = [], userId = 'default') => {
+  const cleanEmails = getCleanFilteredEmails(emails);
+  
+  if (!cleanEmails.length) return {
+    executive_summary: 'Your workspace is clear of urgent professional matters. No immediate action required.',
+    key_updates: [],
+    critical_actions: [],
+    risks: [],
+    insights: [],
+    priority: 'low'
+  };
+
+  const cacheKey = `briefing:v7:${userId}:${cleanEmails.length}:${cleanEmails[0]?.subject}`;
+  const cached = batchSummaryCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) return cached.content;
+
+  const emailList = cleanEmails
+    .slice(0, 35)
+    .map((e, i) => `Email ${i + 1}:\nFrom: ${e.from}\nSubject: ${e.subject}\nContent: ${e.content}`)
+    .join('\n\n---\n\n');
+
+  const fallback = {
+    executive_summary: `Briefing: Analyzing ${cleanEmails.length} professional communications. High recruiter demand detected.`,
+    key_updates: cleanEmails.slice(0, 2).map(e => `Progress regarding ${e.subject}`),
+    critical_actions: cleanEmails.slice(0, 2).map(e => `Address inquiry from ${e.from}`),
+    risks: [],
+    insights: ['Recruitment volume is high.'],
+    priority: 'normal'
+  };
+
+  if (!GROQ_API_KEY) return fallback;
+
+  try {
+    const content = await requestGroq([
+      {
+        role: 'system',
+        content: `You are a Chief of Staff AI assistant. Your role is to THINK, DECIDE, and COMMUNICATE like a human executive assistant.
+
+========================
+STRICT COMMUNICATION RULES
+========================
+- Write like a human, not a system.
+- NO filler phrases like: "Recent activity regarding", "No immediate crisis", "Communication from", "Update for".
+- Be direct, specific, and confident.
+- Every line must add value.
+- Avoid vague verbs like "review" — use clear actions like: "Respond", "Prepare", "Apply", "Follow up".
+
+========================
+INTELLIGENCE RULES
+========================
+- Understand intent behind each email.
+- Rewrite into meaningful insights (do NOT copy subject lines).
+- Combine similar job alerts into one point.
+- Ignore low-value notifications.
+
+========================
+SECTIONS
+========================
+
+1. EXECUTIVE SUMMARY (2–3 sharp lines)
+- Focus on opportunities + urgency.
+- Must feel like a real assistant briefing.
+
+2. KEY UPDATES
+- Only important developments.
+- Rewrite clearly (no filler language).
+
+3. CRITICAL ACTIONS
+- Only actions that matter NOW.
+- Each must be clear and specific.
+  GOOD: "Respond to Deloitte recruiter about next interview step"
+  BAD: "Review Deloitte email"
+
+4. RISKS
+- Only real risks (missed replies, delays, lost opportunities).
+- If none, say: "No immediate risks identified"
+
+5. INSIGHTS
+- Real patterns: recruiter activity trend, demand trends, opportunity level.
+- No generic stats.
+
+6. STRATEGIC RECOMMENDATIONS
+- High-level advice: "Prioritize Deloitte over TATA because of X", "Focus on SQL roles as they match 90% of your profile".
+- Match opportunities with skills and career goals.
+
+========================
+THINKING PROCESS (MANDATORY)
+========================
+1. Classify emails.
+2. Remove noise.
+3. Group similar items.
+4. Generate sharp, human output.
+
+Return ONLY strict JSON.`
+      },
+      {
+        role: 'user',
+        content: `Analyze these communications and generate the executive briefing:\n\n${emailList}\n\nReturn JSON:
+{
+  "executive_summary": "...",
+  "key_updates": ["..."],
+  "critical_actions": ["..."],
+  "risks": ["..."],
+  "insights": ["..."],
+  "recommendations": ["..."],
+  "priority": "low | medium | high"
+} `
+      }
+    ], { temperature: 0.1 });
 
     const json = extractJsonBlock(content || '', 'object');
-    if (!json) return fallback;
-
-    const parsed = JSON.parse(json);
-    return {
-      tone:           ['formal', 'casual', 'friendly', 'direct'].includes(parsed.tone) ? parsed.tone : fallback.tone,
-      greetingStyle:  typeof parsed.greetingStyle === 'string' && parsed.greetingStyle.trim() ? parsed.greetingStyle.trim() : fallback.greetingStyle,
-      signatureStyle: typeof parsed.signatureStyle === 'string' && parsed.signatureStyle.trim() ? parsed.signatureStyle.trim() : fallback.signatureStyle,
-      sentenceLength: ['short', 'medium', 'long'].includes(parsed.sentenceLength) ? parsed.sentenceLength : fallback.sentenceLength,
-      commonPhrases:  Array.isArray(parsed.commonPhrases) ? parsed.commonPhrases.map((p) => String(p).trim()).filter(Boolean).slice(0, 5) : fallback.commonPhrases,
-      styleSummary:   typeof parsed.styleSummary === 'string' && parsed.styleSummary.trim() ? parsed.styleSummary.trim() : fallback.styleSummary,
-      ready:          samples.length >= 5,
-      minSamples:     5,
-      sampleCount:    samples.length,
-    };
-  } catch (error) {
-    console.error('[Groq] Style analysis error:', error.message);
+    if (json) {
+      const parsed = JSON.parse(json);
+      batchSummaryCache.set(cacheKey, { content: parsed, expiry: Date.now() + 5 * 60 * 1000 });
+      return parsed;
+    }
+    return fallback;
+  } catch (err) {
+    console.error('[Groq] Final Decision Grade Chief of Staff error:', err.message);
     return fallback;
   }
 };
 
-// ─── Reply Generation ──────────────────────────────────────────────────────
+/**
+ * Smarter Reply Generation with Tone, Context, and Intent
+ */
+const generateReply = async (emailContent, tone = 'professional', styleProfile = null, intent = 'general') => {
+  const parsed = parseEmailContent(emailContent);
+  const style = styleProfile ? `Tone: ${styleProfile.tone || tone}, Voice: ${styleProfile.styleSummary || 'Concise'}` : `Tone: ${tone}`;
 
-const generateReply = async (emailContent, tone = 'professional', styleProfile = null) => {
-  const fallbackReply = 'Hi,\n\nThanks for the update. I reviewed the email and will follow up shortly.\n\nBest regards,';
-
-  const styleInstruction = styleProfile
-    ? `Match the user's learned writing style:
-Tone: ${styleProfile.tone || tone}
-Greeting: ${styleProfile.greetingStyle || 'Natural, concise greeting'}
-Sign-off: ${styleProfile.signatureStyle || 'Polite sign-off'}
-Sentence length: ${styleProfile.sentenceLength || 'medium'}
-Common phrases: ${(styleProfile.commonPhrases || []).join(', ') || 'none'}`
-    : 'No learned style available — use a professional tone.';
+  const intentInstructions = {
+    accept: 'Accept the proposal, invite, or offer enthusiastically.',
+    negotiate: 'Ask for more information, suggest a different time, or negotiate terms.',
+    decline: 'Politely decline the request or offer with a brief reason.',
+    general: 'Provide a helpful and professional response based on the email context.'
+  };
 
   try {
-    const content = await requestGroq(
-      [
-        {
-          role: 'system',
-          content: `You are a writing assistant that perfectly mimics the user's voice.
-          
-LEARNED STYLE PROFILE:
-Tone: ${styleProfile.tone || tone}
-Sentence Structure: ${styleProfile.sentenceLength || 'medium'}
-Greetings: ${styleProfile.greetingStyle || 'Professional but natural'}
-Sign-offs: ${styleProfile.signatureStyle || 'Professional'}
-Specific Voice Notes: ${styleProfile.styleSummary || 'Concise and helpful'}
-Favorite Phrases: ${(styleProfile.commonPhrases || []).join(', ') || 'none'}
+    const content = await requestGroq([
+      {
+        role: 'system',
+        content: `You are a professional email assistant. Write a clear, concise, and context-aware reply.
 
-INSTRUCTIONS:
-1. Write a response in the user's voice based on the profile above.
-2. Do NOT use bracketed placeholders like [Name]. Use context or skip the name if uncertain.
-3. If the user's style is casual, avoid corporate jargon.
-4. Keep the response ready-to-send.`,
-        },
-        {
-          role: 'user',
-          content: `Draft a reply to this email:\n\n${truncateForPrompt(emailContent)}`,
-        },
-      ],
-      { maxTokens: 450, temperature: 0.7 },
-    );
+Rules:
+- INTENT: ${intentInstructions[intent] || intentInstructions.general}
+- Understand context: job inquiry, interview invite, meeting request, etc.
+- Match requested tone: ${style}.
+- If it's a job → show interest and enthusiasm.
+- If it's a meeting → confirm availability or ask for a link.
+- Keep it under 8 lines.
+- No placeholders like [Your Name]. Use context or skip.`
+      },
+      {
+        role: 'user',
+        content: `Draft a reply to this email:\n\nSubject: ${parsed.subject}\nFrom: ${parsed.sender}\nContent: ${truncateForPrompt(parsed.body)}`
+      }
+    ], { temperature: 0.7 });
 
-    return content || fallbackReply;
-  } catch (error) {
-    console.error('[Groq] Reply generation error:', error.message);
-    return fallbackReply;
+    return content || 'Thank you for your email. I have received it and will follow up shortly.';
+  } catch {
+    return 'Thank you for your email. I will get back to you soon.';
   }
 };
 
-// ─── Exports ───────────────────────────────────────────────────────────────
+// ─── Legacy Wrappers ───────────────────────────────────────────────────────
+
+const summarizeEmail = async (content, subject = '') => {
+  const prompt = `Analyze the following email and generate a structured, action-oriented briefing like a real Chief of Staff.
+
+Focus on:
+- What the email is about
+- Key details (date, time, location, role)
+- Required actions
+- Deadlines
+- Risks if ignored
+
+========================
+IDEAL OUTPUT FORMAT (Strictly follow this for the 'formatted_summary' field)
+========================
+🚨 Priority: HIGH / MEDIUM / LOW
+🏢 Company: [Company Name]
+📩 Role / Context: [Role or Purpose]
+📌 What This Email Means (1–2 lines)
+[Clear explanation in simple language]
+
+⏰ Important Details
+Date: [Date]
+Time: [Time]
+Mode: [Walk-in / Online / Test / etc.]
+Location / Link: [Address or URL]
+
+✅ What You Must Do
+- Step 1
+- Step 2
+- Step 3
+
+⚠️ Deadline / Urgency
+[Exact deadline or time window]
+
+🎯 Why This Matters
+[Short impact statement]
+
+🚫 Risk If Ignored
+[What the user loses]
+
+Return ONLY a valid JSON object:
+{
+  "priority": "HIGH" | "MEDIUM" | "LOW",
+  "company": "...",
+  "role": "...",
+  "action_url": "...",
+  "deadline": "...",
+  "formatted_summary": "..."
+}`;
+
+  try {
+    const result = await requestGroq([
+      { role: 'system', content: 'You are an email-intelligent briefing system acting as a Chief of Staff. You think, decide, and guide decisions clearly.' },
+      { role: 'user', content: `${prompt}\n\nSubject: ${subject}\n\nContent: ${content}` }
+    ], { temperature: 0.1 });
+
+    // Try to extract JSON, but if it fails or returns plain text, wrap it.
+    const json = extractJsonBlock(result || '', 'object');
+    if (json) {
+      return json; // Return the JSON string itself to be stored in the summary field
+    }
+
+    // Fallback if AI didn't return JSON
+    return JSON.stringify({
+      priority: "MEDIUM",
+      formatted_summary: result || 'No summary available.'
+    });
+  } catch (error) {
+    console.error('[XAI] Summarize error:', error.message);
+    return 'No summary available.';
+  }
+};
+
+const summarizeThread = async (emails = []) => {
+  if (!emails.length) return null;
+
+  const threadContent = emails
+    .map((e, i) => `[Email ${i + 1}] From: ${e.sender}\nSubject: ${e.subject}\nContent: ${e.body || e.snippet}`)
+    .join('\n\n---\n\n');
+
+  const prompt = `Analyze this full email conversation thread and generate a single, actionable briefing for the entire opportunity.
+
+Think like a Chief of Staff:
+- What is the current status of this thread?
+- What are the cumulative next steps?
+- Who is the main company/contact?
+- What is the overall priority?
+
+========================
+IDEAL OUTPUT FORMAT
+========================
+🚨 Overall Priority: HIGH / MEDIUM / LOW
+🏢 Company: 
+📩 Role / Context: 
+📌 Thread Summary
+[1-2 lines on the current state of the conversation]
+
+✅ Required Actions (Cumulative)
+- Step 1
+- Step 2
+
+⚠️ Next Deadline
+[Upcoming deadline if any]
+
+🎯 Strategic Insight
+[Advice on how to handle this thread]
+
+Return ONLY a valid JSON object:
+{
+  "priority": "HIGH" | "MEDIUM" | "LOW",
+  "company": "...",
+  "role": "...",
+  "summary": "...",
+  "action_required": true | false,
+  "deadline": "...",
+  "formatted_briefing": "..."
+}`;
+
+  try {
+    const result = await requestGroq([
+      { role: 'system', content: 'You provide thread-level intelligence for email conversations.' },
+      { role: 'user', content: `${prompt}\n\nThread Content:\n${threadContent}` }
+    ], { temperature: 0.1 });
+
+    const json = extractJsonBlock(result || '', 'object');
+    return json ? JSON.parse(json) : null;
+  } catch (error) {
+    console.error('[XAI] Summarize thread error:', error.message);
+    return null;
+  }
+};
+
+const classifyEmail = async (content) => {
+  const prompt = `Classify this email into one of these specific types:
+- Interview Invite
+- Walk-in Drive
+- Job Opening
+- Rejection
+- Assessment/Test
+- General Professional
+- Newsletter/Spam
+
+Priority Detection Logic:
+- Interview today/tomorrow -> HIGH
+- Interview in 2-3 days -> HIGH
+- Assessment/Test with deadline < 48h -> HIGH
+- Job opening -> MEDIUM
+- Newsletter -> LOW
+
+Return ONLY a valid JSON: 
+{
+  "category": "...", 
+  "priority": "high" | "normal" | "low", 
+  "labels": ["..."], 
+  "actionRequired": true | false
+}`;
+
+  const result = await requestGroq([
+    { role: 'system', content: 'You are a high-precision email classifier.' },
+    { role: 'user', content: `${prompt}\n\nEmail Content:\n${content}` }
+  ]);
+  
+  const json = extractJsonBlock(result) || '{"category":"General Professional","priority":"normal","labels":[],"actionRequired":false}';
+  try {
+    return JSON.parse(json);
+  } catch (e) {
+    return {"category":"General Professional","priority":"normal","labels":[],"actionRequired":false};
+  }
+};
 
 module.exports = {
-  summarizeEmail,
-  classifyEmail,
-  generateReply,
-  analyzeWritingStyle,
   summarizeBatchEmails,
-  requestXAI,
+  generateReply,
+  summarizeEmail,
+  summarizeThread,
+  classifyEmail,
   requestGroq,
-  getXAIErrorMessage,
-  getGroqErrorMessage,
-  isXAIRateLimitError,
-  isXAICreditsOrPermissionError,
-  isGroqRateLimitError,
-  isGroqCreditsOrPermissionError,
-  XAI_MODEL,
-  GROQ_MODEL,
+  XAI_MODEL
 };

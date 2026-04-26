@@ -75,7 +75,22 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
 
   const showDetails = expanded || !compact;
   const showControls = (!compact || expanded) && !isThreaded;
-  const summaryText = email.summary || email.snippet || 'No summary available yet. Refresh summary to analyze this email.';
+  
+  // Parse structured summary if available
+  let summaryText = email.summary || email.snippet || 'No summary available yet. Refresh summary to analyze this email.';
+  let summaryMeta = null;
+  
+  try {
+    if (email.summary && (email.summary.startsWith('{') || email.summary.startsWith('['))) {
+      const parsed = JSON.parse(email.summary);
+      if (parsed.formatted_summary) {
+        summaryText = parsed.formatted_summary;
+        summaryMeta = parsed;
+      }
+    }
+  } catch (e) {
+    // Fallback to plain text
+  }
 
   return (
     <article className={`mail-card ${compact ? 'mail-card-compact' : ''} ${isThreaded ? 'mail-card-threaded' : ''}`} data-legacy-icon={getCategoryIcon(email.category)}>
@@ -99,8 +114,11 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
           <span className="mail-pill" style={{
             color: getPriorityColor(email.priority),
             borderColor: `${getPriorityColor(email.priority)}40`,
-            background: getPriorityBg(email.priority)
+            background: getPriorityBg(email.priority),
+            fontWeight: 'bold',
+            textTransform: 'uppercase'
           }}>
+            {email.priority === 'high' ? '🚨 ' : email.priority === 'low' ? '🟢 ' : '🟡 '}
             {email.priority || 'normal'}
           </span>
           <span className="mail-timestamp">{new Date(email.receivedAt || email.createdAt).toLocaleString()}</span>
@@ -108,13 +126,52 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
       </div>
 
       <div className="mail-summary mail-summary-card" style={{
-        background: 'rgba(47, 111, 228, 0.05)',
-        border: '1px solid rgba(47, 111, 228, 0.12)',
+        background: email.priority === 'high' ? 'rgba(239, 68, 68, 0.03)' : 'rgba(47, 111, 228, 0.05)',
+        border: email.priority === 'high' ? '1px solid rgba(239, 68, 68, 0.15)' : '1px solid rgba(47, 111, 228, 0.12)',
         borderRadius: '12px',
-        padding: '0.85rem 1rem'
+        padding: '1rem',
+        boxShadow: email.priority === 'high' ? '0 4px 12px rgba(239, 68, 68, 0.08)' : 'none'
       }}>
-        <span className="eyebrow">{email.priority === 'high' || email.actionRequired ? 'Priority insight' : 'AI takeaway'}</span>
-        <p style={{ color: 'var(--muted-strong)' }}>{summaryText}</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="eyebrow" style={{ color: email.priority === 'high' ? '#ef4444' : 'var(--accent)' }}>
+            {email.priority === 'high' ? '⚡ CRITICAL BRIEFING' : '🧠 AI COMMANDER BRIEF'}
+          </span>
+          {summaryMeta?.company && (
+            <span className="mail-pill" style={{ fontSize: '0.75rem', background: 'rgba(0,0,0,0.05)' }}>
+              🏢 {summaryMeta.company}
+            </span>
+          )}
+        </div>
+        <p style={{ 
+          color: 'var(--muted-strong)', 
+          whiteSpace: 'pre-line', 
+          marginTop: '0.75rem', 
+          fontSize: '0.95rem',
+          lineHeight: '1.5'
+        }}>{summaryText}</p>
+        
+        {summaryMeta?.action_url && (
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+            <a 
+              href={summaryMeta.action_url} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="button button-secondary"
+              style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+            >
+              🚀 Apply / Open Link
+            </a>
+            {summaryMeta.deadline && (
+              <button 
+                className="button button-ghost"
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', border: '1px solid #ccc' }}
+                onClick={() => alert(`Deadline: ${summaryMeta.deadline}`)}
+              >
+                📅 Add to Calendar
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mail-label-row">
@@ -181,90 +238,6 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
       {showReply && showControls ? <ReplyGenerator email={email} onClose={() => setShowReply(false)} onSent={onUpdate} /> : null}
     </article>
   );
-
-  /*
-  return (
-    <div className={`email-card ${expanded ? 'expanded' : ''}`}>
-      <div className="email-header" onClick={() => setExpanded(!expanded)}>
-        <div className="email-meta">
-          <div className="email-avatar">
-            {email.sender?.charAt(0).toUpperCase() || '?'}
-          </div>
-          <div className="email-info">
-            <p className="email-sender">{email.sender || 'Unknown'}</p>
-            <p className="email-time">
-              {new Date(email.receivedAt || email.createdAt).toLocaleDateString()}
-            </p>
-          </div>
-        </div>
-
-        <div className="email-badges">
-          <span 
-            className="priority-badge" 
-            style={{ backgroundColor: getPriorityColor(email.priority) }}
-          >
-            {email.priority}
-          </span>
-          <span className="category-badge">
-            {getCategoryIcon(email.category)} {email.category}
-          </span>
-        </div>
-      </div>
-
-      <div className="email-subject">
-        <h3>{email.subject || 'No Subject'}</h3>
-      </div>
-
-      {email.summary && (
-        <div className="email-summary">
-          <div className="summary-header">
-            <span>🤖</span>
-            <strong>AI Summary</strong>
-          </div>
-          <p>{email.summary}</p>
-        </div>
-      )}
-
-      {expanded && (
-        <div className="email-body">
-          <p>{email.body?.substring(0, 500) || email.snippet || 'No content'}</p>
-        </div>
-      )}
-
-      <div className="email-actions">
-        <button 
-          className="action-small" 
-          onClick={handleAISummarize}
-          disabled={summarizing}
-          title="AI Summarize"
-        >
-          {summarizing ? '⏳' : '🤖'} Summarize
-        </button>
-        <button 
-          className="action-small" 
-          onClick={handleAIClassify}
-          disabled={classifying}
-          title="AI Classify"
-        >
-          {classifying ? '⏳' : '📊'} Classify
-        </button>
-        <button 
-          className="action-small primary"
-          onClick={() => setShowReply(!showReply)}
-        >
-          ✍️ Reply
-        </button>
-      </div>
-
-      {showReply && (
-        <ReplyGenerator 
-          email={email} 
-          onClose={() => setShowReply(false)} 
-        />
-      )}
-    </div>
-  );
-  */
 };
 
 export default EmailCard;

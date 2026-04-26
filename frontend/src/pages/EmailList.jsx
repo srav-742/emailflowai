@@ -5,14 +5,19 @@ import { useEmailStore } from '../store/emailStore';
 import { useSSE } from '../hooks/useSSE';
 import EmailCard from '../components/EmailCard';
 import ThreadView from '../components/ThreadView';
+import ThreadCard from '../components/ThreadCard';
 import { connectSocket } from '../services/socket';
 import './EmailList.css';
 
 const EmailList = ({ filter = {}, title = 'Inbox command center', description = 'Review and process every thread in one place.' }) => {
   const { user, token } = useAuth();
-  const { emails, setEmails, loading, setLoading } = useEmailStore();
+  const emails = useEmailStore((state) => state.emails);
+  const setEmails = useEmailStore((state) => state.setEmails);
+  const loading = useEmailStore((state) => state.loading);
+  const setLoading = useEmailStore((state) => state.setLoading);
+
   const [query, setQuery] = useState('');
-  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
+  const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
   const [liveMessage, setLiveMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'threads'
@@ -199,15 +204,26 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
         ) : (
           <>
             {emails.length > 0 ? (
-              emails.map((email) => (
-                <EmailCard 
-                  key={email.id} 
-                  email={email} 
-                  onUpdate={fetchEmails} 
-                  onThreadClick={email.threadId ? () => setSelectedThreadId(email.threadId) : null}
-                  isThreadHead={viewMode === 'threads'}
-                />
-              ))
+              emails.map((item) => {
+                if (viewMode === 'threads') {
+                  return (
+                    <ThreadCard 
+                      key={item.id || item.threadId} 
+                      thread={item} 
+                      onClick={() => setSelectedThreadId(item.id || item.threadId)}
+                    />
+                  );
+                }
+                return (
+                  <EmailCard 
+                    key={item.id} 
+                    email={item} 
+                    onUpdate={fetchEmails} 
+                    onThreadClick={item.threadId ? () => setSelectedThreadId(item.threadId) : null}
+                    isThreadHead={viewMode === 'threads'}
+                  />
+                );
+              })
             ) : (
               <div className="empty-card">
                 <h3>No emails matched this view.</h3>

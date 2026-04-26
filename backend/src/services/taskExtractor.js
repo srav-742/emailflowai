@@ -70,7 +70,13 @@ function isGroqCreditsOrPermissionError(error) {
 
 function enterTaskCooldown(error) {
   const message       = extractRateLimitMessage(error);
-  const retryAfterMs  = parseRetryAfterMs(message) || 2 * 60 * 1000;
+  let retryAfterMs    = parseRetryAfterMs(message) || 2 * 60 * 1000;
+  
+  // Cap cooldown to 15 minutes max
+  if (retryAfterMs > 15 * 60 * 1000) {
+    retryAfterMs = 15 * 60 * 1000;
+  }
+
   taskCooldownUntil   = Date.now() + retryAfterMs;
   taskCooldownReason  = message;
   console.warn(`[Groq/Tasks] Cooling down until ${new Date(taskCooldownUntil).toLocaleTimeString()}. Falling back to local extraction.`);

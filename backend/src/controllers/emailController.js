@@ -1,6 +1,6 @@
 const prisma = require('../config/database');
 const { analyzeEmailIntelligence, generateSummary } = require('../utils/classifier');
-const { summarizeEmail: xaiSummarize, classifyEmail: xaiClassify, generateReply, XAI_MODEL } = require('../utils/xai');
+const { summarizeBatchEmails, generateReply, XAI_MODEL } = require('../utils/xai');
 const { extractTasksWithAI } = require('../services/taskExtractor');
 const { getAuthenticatedUser, syncInbox } = require('../services/inboxSyncService');
 const { trackAIAction } = require('../services/analyticsService');
@@ -12,14 +12,8 @@ const { getUserSocketRoom } = require('../utils/socketRooms');
 const StyleExtractor = require('../services/StyleExtractor');
 
 function parseCsvList(value) {
-  if (!value) {
-    return [];
-  }
-
-  return String(value)
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
+  if (!value) return [];
+  return String(value).split(',').map((item) => item.trim()).filter(Boolean);
 }
 
 function buildEmailContent(email) {
@@ -39,11 +33,7 @@ function buildReplyRawMessage({ to, subject, body }) {
     body,
   ].join('\r\n');
 
-  return Buffer.from(message)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+  return Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 function normalizeReplyText(value = '') {
@@ -52,15 +42,8 @@ function normalizeReplyText(value = '') {
 
 function normalizeStoredPriority(value) {
   const normalized = String(value || '').trim().toLowerCase();
-
-  if (normalized === 'medium') {
-    return 'normal';
-  }
-
-  if (['high', 'normal', 'low'].includes(normalized)) {
-    return normalized;
-  }
-
+  if (normalized === 'medium') return 'normal';
+  if (['high', 'normal', 'low'].includes(normalized)) return normalized;
   return 'normal';
 }
 
@@ -74,7 +57,7 @@ async function logAIUsage(userId, options = {}) {
 
 const fetchEmails = async (req, res) => {
   try {
-    const result = await syncInbox(req.user.id, 20, { returnMeta: true });
+    const result = await syncInbox(req.user.id, 100, { returnMeta: true });
     res.json({
       emails: result.emails,
       newEmails: result.newEmails,
@@ -103,15 +86,13 @@ const getEmails = async (req, res) => {
       ...(isRead !== undefined ? { isRead: isRead === 'true' } : {}),
       ...(actionRequired !== undefined ? { actionRequired: actionRequired === 'true' } : {}),
       ...(labelList.length ? { labels: { hasSome: labelList } } : {}),
-      ...(q
-        ? {
+      ...(q ? {
             OR: [
               { subject: { contains: String(q), mode: 'insensitive' } },
               { sender: { contains: String(q), mode: 'insensitive' } },
               { snippet: { contains: String(q), mode: 'insensitive' } },
             ],
-          }
-        : {}),
+          } : {}),
     };
 
     const emails = await prisma.email.findMany({
@@ -140,50 +121,38 @@ const getEmails = async (req, res) => {
 
 const getThreads = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, priority, category } = req.query;
+    
+    const where = {
+      userId: req.user.id,
+      ...(priority ? { priority: String(priority) } : {}),
+      ...(category ? { category: String(category) } : {}),
+    };
 
-    // To get threads, we find the latest message for each threadId
-    // and return those as the "representative" of the thread.
-    const threads = await prisma.email.groupBy({
-      by: ['threadId'],
-      where: { userId: req.user.id },
-      _max: {
-        receivedAt: true,
-      },
-      orderBy: {
-        _max: {
-          receivedAt: 'desc',
-        },
-      },
+    const threads = await prisma.thread.findMany({
+      where,
+      orderBy: { lastReceivedAt: 'desc' },
       skip: (Number(page) - 1) * Number(limit),
       take: Number(limit),
+      include: {
+        _count: {
+          select: { emails: true }
+        }
+      }
     });
 
-    // Now fetch the actual email details for these latest messages
-    const threadedEmails = await Promise.all(
-      threads.map(async (t) => {
-        return prisma.email.findFirst({
-          where: {
-            userId: req.user.id,
-            threadId: t.threadId,
-            receivedAt: t._max.receivedAt,
-          },
-        });
-      })
-    );
-
-    const totalThreads = await prisma.email.groupBy({
-      by: ['threadId'],
-      where: { userId: req.user.id },
-    });
+    const total = await prisma.thread.count({ where });
 
     res.json({
-      threads: threadedEmails.filter(Boolean),
+      threads: threads.map(t => ({
+        ...t,
+        emailCount: t._count?.emails || 0
+      })),
       pagination: {
         page: Number(page),
         limit: Number(limit),
-        total: totalThreads.length,
-        pages: Math.ceil(totalThreads.length / Number(limit)),
+        total,
+        pages: Math.ceil(total / Number(limit)),
       },
     });
   } catch (error) {
@@ -195,20 +164,27 @@ const getThreads = async (req, res) => {
 const getThreadById = async (req, res) => {
   try {
     const { threadId } = req.params;
+    
+    const [thread, emails] = await Promise.all([
+      prisma.thread.findUnique({
+        where: { id: threadId }
+      }),
+      prisma.email.findMany({
+        where: {
+          userId: req.user.id,
+          threadId,
+        },
+        orderBy: { receivedAt: 'asc' },
+      })
+    ]);
 
-    const emails = await prisma.email.findMany({
-      where: {
-        userId: req.user.id,
-        threadId,
-      },
-      orderBy: { receivedAt: 'asc' },
+    if (!emails.length) return res.status(404).json({ error: 'Thread not found' });
+    
+    res.json({ 
+      threadId, 
+      metadata: thread,
+      emails 
     });
-
-    if (!emails.length) {
-      return res.status(404).json({ error: 'Thread not found' });
-    }
-
-    res.json({ threadId, emails });
   } catch (error) {
     console.error('Get thread error:', error);
     res.status(500).json({ error: 'Failed to get thread details' });
@@ -224,10 +200,7 @@ const getEmailById = async (req, res) => {
       },
     });
 
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
-
+    if (!email) return res.status(404).json({ error: 'Email not found' });
     res.json({ email });
   } catch (error) {
     console.error('Get email error:', error);
@@ -237,10 +210,7 @@ const getEmailById = async (req, res) => {
 
 const classifyEmails = async (req, res) => {
   try {
-    const emails = await prisma.email.findMany({
-      where: { userId: req.user.id },
-    });
-
+    const emails = await prisma.email.findMany({ where: { userId: req.user.id } });
     const updated = [];
 
     for (const email of emails) {
@@ -261,7 +231,6 @@ const classifyEmails = async (req, res) => {
           actionRequired: intelligence.actionRequired,
         },
       });
-
       updated.push(updatedEmail);
     }
 
@@ -281,12 +250,9 @@ const summarizeEmail = async (req, res) => {
       },
     });
 
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
+    if (!email) return res.status(404).json({ error: 'Email not found' });
 
     const summary = generateSummary(email.subject || '', email.snippet || '', email.body || '');
-
     const updatedEmail = await prisma.email.update({
       where: { id: email.id },
       data: { summary },
@@ -313,16 +279,9 @@ const summarizeEmail = async (req, res) => {
 const searchEmails = async (req, res) => {
   try {
     const { q, page = 1, limit = 20 } = req.query;
-
-    if (!q) {
-      return res.status(400).json({ error: 'Search query is required' });
-    }
+    if (!q) return res.status(400).json({ error: 'Search query is required' });
 
     const offset = (Number(page) - 1) * Number(limit);
-    const searchTerm = String(q).trim().split(/\s+/).join(' & '); // Format for websearch_to_tsquery or plain to_tsquery
-
-    // We use raw SQL to leverage PostgreSQL's tsvector and ranking capabilities
-    // This allows searching across subject and body with relevancy ranking.
     const emails = await prisma.$queryRaw`
       SELECT * FROM "Email"
       WHERE "userId" = ${req.user.id}
@@ -337,7 +296,6 @@ const searchEmails = async (req, res) => {
       LIMIT ${Number(limit)} OFFSET ${offset}
     `;
 
-    // Count total matches for pagination
     const countResult = await prisma.$queryRaw`
       SELECT count(*)::int as count FROM "Email"
       WHERE "userId" = ${req.user.id}
@@ -367,9 +325,7 @@ const searchEmails = async (req, res) => {
 const getStats = async (req, res) => {
   try {
     const [totalEmails, byCategory, byPriority, unreadCount, actionRequired, followUpCount, taskPayload] = await Promise.all([
-      prisma.email.count({
-        where: { userId: req.user.id },
-      }),
+      prisma.email.count({ where: { userId: req.user.id } }),
       prisma.email.groupBy({
         by: ['category'],
         where: { userId: req.user.id },
@@ -380,15 +336,9 @@ const getStats = async (req, res) => {
         where: { userId: req.user.id },
         _count: true,
       }),
-      prisma.email.count({
-        where: { userId: req.user.id, isRead: false },
-      }),
-      prisma.email.count({
-        where: { userId: req.user.id, actionRequired: true },
-      }),
-      prisma.email.count({
-        where: { userId: req.user.id, followUp: true },
-      }),
+      prisma.email.count({ where: { userId: req.user.id, isRead: false } }),
+      prisma.email.count({ where: { userId: req.user.id, actionRequired: true } }),
+      prisma.email.count({ where: { userId: req.user.id, followUp: true } }),
       prisma.email.findMany({
         where: { userId: req.user.id },
         select: { tasks: true },
@@ -418,22 +368,26 @@ const getStats = async (req, res) => {
 
 const syncEmails = async (req, res) => {
   try {
-    const result = await syncInbox(req.user.id, 40, { returnMeta: true });
+    const result = await syncInbox(req.user.id, 100, { returnMeta: true });
     const io = req.app.get('io');
 
     if (result.newEmails.length > 0) {
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },
-        select: {
-          id: true,
-          importantContacts: true,
-        },
+        select: { id: true, importantContacts: true },
       });
 
       if (user) {
         emitEmailNotifications(io, user, result.newEmails);
       } else {
         io.to(getUserSocketRoom(req.user.id)).emit('new-emails', result.newEmails);
+      }
+
+      try {
+        const summary = await summarizeBatchEmails(result.emails, req.user.id);
+        io.to(getUserSocketRoom(req.user.id)).emit('inbox-summary', summary);
+      } catch (err) {
+        console.error('Failed to auto-update batch summary during sync:', err);
       }
     }
 
@@ -463,9 +417,7 @@ const extractEmailTasks = async (req, res) => {
       },
     });
 
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
+    if (!email) return res.status(404).json({ error: 'Email not found' });
 
     const tasks = await extractTasksWithAI(email);
     const updatedEmail = await prisma.email.update({
@@ -506,9 +458,7 @@ const aiSummarize = async (req, res) => {
       },
     });
 
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
+    if (!email) return res.status(404).json({ error: 'Email not found' });
 
     const summary = await xaiSummarize(buildEmailContent(email), email.subject || '');
     const updatedEmail = await prisma.email.update({
@@ -545,12 +495,9 @@ const aiClassify = async (req, res) => {
       },
     });
 
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
+    if (!email) return res.status(404).json({ error: 'Email not found' });
 
     const classification = await xaiClassify(buildEmailContent(email));
-
     const updatedEmail = await prisma.email.update({
       where: { id: email.id },
       data: {
@@ -583,7 +530,7 @@ const aiClassify = async (req, res) => {
 
 const aiGenerateReply = async (req, res) => {
   try {
-    const { tone = 'professional' } = req.body;
+    const { tone = 'professional', intent = 'general' } = req.body;
 
     const email = await prisma.email.findFirst({
       where: {
@@ -592,19 +539,17 @@ const aiGenerateReply = async (req, res) => {
       },
     });
 
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
+    if (!email) return res.status(404).json({ error: 'Email not found' });
 
     const styleProfile = await getOrCreateStyleProfile(req.user.id);
-    const reply = await generateReply(buildEmailContent(email), tone, styleProfile);
+    const reply = await generateReply(buildEmailContent(email), tone, styleProfile, intent);
 
     await prisma.aILog.create({
       data: {
         emailId: email.id,
         userId: req.user.id,
         actionType: 'reply',
-        prompt: `Reply to: ${email.subject} (tone: ${tone})`,
+        prompt: `Reply to: ${email.subject} (tone: ${tone}, intent: ${intent})`,
         response: reply,
         model: XAI_MODEL,
       },
@@ -612,7 +557,7 @@ const aiGenerateReply = async (req, res) => {
 
     await logAIUsage(req.user.id, { aiActions: 1, timeSaved: 3 });
 
-    res.json({ message: 'Reply generated using AI', reply, tone, style: styleProfile });
+    res.json({ message: 'Reply generated using AI', reply, tone, intent, style: styleProfile });
   } catch (error) {
     console.error('AI reply error:', error);
     res.status(500).json({ error: 'Failed to generate reply with AI' });
@@ -622,24 +567,16 @@ const aiGenerateReply = async (req, res) => {
 const sendReply = async (req, res) => {
   try {
     const { body, generatedReply = '', wasEdited } = req.body;
-
-    if (!body?.trim()) {
-      return res.status(400).json({ error: 'Reply body is required' });
-    }
+    if (!body?.trim()) return res.status(400).json({ error: 'Reply body is required' });
 
     const [email, user] = await Promise.all([
       prisma.email.findFirst({
-        where: {
-          id: req.params.id,
-          userId: req.user.id,
-        },
+        where: { id: req.params.id, userId: req.user.id },
       }),
       getAuthenticatedUser(req.user.id),
     ]);
 
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found' });
-    }
+    if (!email) return res.status(404).json({ error: 'Email not found' });
 
     const gmail = await getAuthenticatedGmailClient(req.user.id);
     const raw = buildReplyRawMessage({
@@ -668,8 +605,7 @@ const sendReply = async (req, res) => {
     });
 
     const normalizedSubject = /^re:/i.test(email.subject || '') ? email.subject || 'Your message' : `Re: ${email.subject || 'Your message'}`;
-    const userEditedReply =
-      typeof wasEdited === 'boolean' ? wasEdited : normalizeReplyText(body) !== normalizeReplyText(generatedReply);
+    const userEditedReply = typeof wasEdited === 'boolean' ? wasEdited : normalizeReplyText(body) !== normalizeReplyText(generatedReply);
 
     if (result.data.id) {
       await prisma.email.upsert({
@@ -747,10 +683,7 @@ const sendReply = async (req, res) => {
 
 const aiProcessAll = async (req, res) => {
   try {
-    const emails = await prisma.email.findMany({
-      where: { userId: req.user.id },
-    });
-
+    const emails = await prisma.email.findMany({ where: { userId: req.user.id } });
     let processedCount = 0;
     const results = [];
 
@@ -784,32 +717,22 @@ const aiProcessAll = async (req, res) => {
             model: XAI_MODEL,
           },
         });
-
         results.push({ id: email.id, subject: email.subject, status: 'success' });
         processedCount++;
       } catch (error) {
-        results.push({
-          id: email.id,
-          subject: email.subject,
-          status: 'failed',
-          error: error.message || 'Unknown AI processing error',
-        });
+        results.push({ id: email.id, subject: email.subject, status: 'failed', error: error.message });
       }
     }
 
     if (processedCount > 0) {
-      await logAIUsage(req.user.id, {
-        aiActions: processedCount * 3,
-        timeSaved: processedCount * 3,
-      });
+      await logAIUsage(req.user.id, { aiActions: processedCount * 3, timeSaved: processedCount * 3 });
+      const io = req.app.get('io');
+      const latestEmails = await prisma.email.findMany({ where: { userId: req.user.id }, orderBy: { receivedAt: 'desc' }, take: 35 });
+      const summary = await summarizeBatchEmails(latestEmails, req.user.id);
+      io.to(getUserSocketRoom(req.user.id)).emit('inbox-summary', summary);
     }
 
-    res.json({
-      message: `Processed ${processedCount}/${emails.length} emails`,
-      processedCount,
-      totalCount: emails.length,
-      results,
-    });
+    res.json({ message: `Processed ${processedCount}/${emails.length} emails`, processedCount, totalCount: emails.length, results });
   } catch (error) {
     console.error('AI process all error:', error);
     res.status(500).json({ error: 'Failed to process emails with AI' });

@@ -146,6 +146,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/action-items', actionItemRoutes);
+app.use('/api/follow-ups', followUpRoutes);
 
 app.get('/api/health', async (req, res) => {
   let database = 'disconnected';

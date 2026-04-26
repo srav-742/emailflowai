@@ -36,8 +36,9 @@ groqClient.interceptors.request.use((config) => {
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function extractJsonBlock(value = '', mode = 'object') {
+  if (!value) return null;
   const pattern = mode === 'array' ? /\[[\s\S]*\]/ : /\{[\s\S]*\}/;
-  const match = value.match(pattern);
+  const match = String(value).match(pattern);
   return match ? match[0] : null;
 }
 
@@ -463,12 +464,43 @@ Return ONLY a valid JSON:
   }
 };
 
+const checkReplyRequired = async (emailContent) => {
+  const prompt = `Analyze this SENT email and determine if it requires a reply from the recipient.
+  
+  Consider:
+  - Is there a direct question?
+  - Is there a call to action or request?
+  - Is it a proposal or application that needs a response?
+  - Is it just an acknowledgment or "thank you" (which usually doesn't require a reply)?
+  
+  Return ONLY a valid JSON:
+  {
+    "requiresReply": true | false,
+    "confidence": 0.0 to 1.0,
+    "reason": "short explanation"
+  }`;
+
+  try {
+    const result = await requestGroq([
+      { role: 'system', content: 'You are an email intent analyst focusing on follow-up necessity.' },
+      { role: 'user', content: `${prompt}\n\nEmail Content:\n${emailContent}` }
+    ], { temperature: 0.1 });
+
+    const json = extractJsonBlock(result) || '{"requiresReply":false,"confidence":0,"reason":"Failed to parse"}';
+    return JSON.parse(json);
+  } catch (error) {
+    console.error('[XAI] checkReplyRequired error:', error.message);
+    return { requiresReply: false, confidence: 0, reason: error.message };
+  }
+};
+
 module.exports = {
   summarizeBatchEmails,
   generateReply,
   summarizeEmail,
   summarizeThread,
   classifyEmail,
+  checkReplyRequired,
   requestGroq,
   XAI_MODEL
 };

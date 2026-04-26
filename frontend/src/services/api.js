@@ -64,4 +64,10 @@ export const actionItemAPI = {
   extractFromEmail: (emailId) => api.post(`/action-items/${emailId}/extract`),
 };
 
+export const followUpAPI = {
+  getItems: () => api.get('/follow-ups'),
+  snooze: (id, days) => api.patch(`/follow-ups/${id}/snooze`, { days }),
+  dismiss: (id) => api.patch(`/follow-ups/${id}/dismiss`),
+};
+
 export default api;

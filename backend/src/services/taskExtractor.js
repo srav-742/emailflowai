@@ -13,6 +13,19 @@ const PRIORITY_LEVELS = new Set(['low', 'medium', 'high']);
 const ACTIONABLE_PATTERN =
   /\b(please|can you|could you|kindly|need to|follow up|schedule|send|share|review|submit|prepare|update|reply|deadline|asap|urgent)\b/i;
 
+const IGNORED_PATTERNS = [
+  /People You May Know/i,
+  /LinkedIn/i,
+  /Unsubscribe/i,
+  /Newsletter/i,
+  /Promotion/i,
+  /Security Alert/i,
+  /Verify your email/i,
+  /Password reset/i,
+  /Job alert from/i,
+  /Suggested for you/i,
+];
+
 let taskCooldownUntil  = 0;
 let taskCooldownReason = null;
 
@@ -28,7 +41,8 @@ function truncateForPrompt(value = '', limit = 1800) {
 }
 
 function cleanJsonBlock(value = '') {
-  return value.replace(/```json/gi, '').replace(/```/g, '').trim();
+  if (!value) return '';
+  return String(value).replace(/```json/gi, '').replace(/```/g, '').trim();
 }
 
 function parseRetryAfterMs(message = '') {
@@ -111,6 +125,7 @@ function dedupeTasks(tasks = []) {
 }
 
 function parseTasksResponse(value = '') {
+  if (!value) return [];
   const cleaned     = cleanJsonBlock(value);
   const arrayMatch  = cleaned.match(/\[[\s\S]*\]/);
   if (!arrayMatch) return [];
@@ -181,8 +196,19 @@ function extractTasksFallback(email = {}) {
 }
 
 function isLikelyActionableEmail(email = {}) {
+  // 1. Explicit signals
   if (email.actionRequired || email.priority === 'high') return true;
-  const content = `${email.subject || ''} ${email.body || ''} ${email.snippet || ''}`;
+
+  // 2. Filter out known noise
+  const subject = email.subject || '';
+  const sender = email.sender || '';
+  const textContent = `${subject} ${sender}`.toLowerCase();
+
+  const isIgnored = IGNORED_PATTERNS.some(pattern => pattern.test(textContent));
+  if (isIgnored) return false;
+
+  // 3. Check for actionable keywords in body/snippet
+  const content = `${subject} ${email.body || ''} ${email.snippet || ''}`;
   return ACTIONABLE_PATTERN.test(content);
 }
 

@@ -1,105 +1,123 @@
 const prisma = require('../config/database');
-const { emitFollowUpNotifications } = require('./notificationService');
+const { checkReplyRequired } = require('../utils/xai');
 
-const FOLLOW_UP_DAYS = Number(process.env.FOLLOW_UP_DAYS || 2);
+/**
+ * Detects if a sent email requires a reply and creates a follow-up record if so.
+ */
+async function detectAndCreateFollowUp(email, userId) {
+  try {
+    // Only process sent emails
+    if (!email.isSent) return null;
 
-async function detectFollowUps(io = null) {
-  // Only look at sent emails from the last 30 days to keep it performant
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // AI check for reply requirement
+    const emailContent = `Subject: ${email.subject}\nBody: ${email.body || email.snippet}`;
+    const result = await checkReplyRequired(emailContent);
 
-  const sentEmails = await prisma.email.findMany({
+    if (result.requiresReply && result.confidence > 0.6) {
+      const sentAt = new Date(email.receivedAt);
+      const remindAt = new Date(sentAt.getTime() + 3 * 24 * 60 * 60 * 1000); // Default 3 days
+
+      return await prisma.followUp.create({
+        data: {
+          userId,
+          sentEmailId: email.id,
+          threadId: email.threadId,
+          recipientEmail: email.recipients[0] || 'unknown',
+          subject: email.subject || 'No Subject',
+          sentAt,
+          remindAt,
+          status: 'waiting',
+        },
+      });
+    }
+  } catch (error) {
+    console.error('[FollowUpService] Detection failed:', error.message);
+  }
+  return null;
+}
+
+/**
+ * Checks if a reply has arrived for a specific thread and marks follow-up as replied.
+ */
+async function resolveFollowUpIfReplied(userId, threadId, incomingEmail) {
+  try {
+    // If the incoming email is NOT sent by the user, it's a potential reply
+    if (incomingEmail.isSent) return null;
+
+    const followUp = await prisma.followUp.findFirst({
+      where: {
+        userId,
+        threadId,
+        status: 'waiting',
+      },
+    });
+
+    if (followUp) {
+      return await prisma.followUp.update({
+        where: { id: followUp.id },
+        data: {
+          status: 'replied',
+          replyReceivedAt: new Date(incomingEmail.receivedAt),
+        },
+      });
+    }
+  } catch (error) {
+    console.error('[FollowUpService] Resolution failed:', error.message);
+  }
+  return null;
+}
+
+/**
+ * Get all active follow-ups for a user.
+ */
+async function getActiveFollowUps(userId) {
+  return await prisma.followUp.findMany({
     where: {
-      userId: { not: undefined }, // Ensure userId exists
-      isSent: true,
-      threadId: { not: null },
-      receivedAt: { gte: thirtyDaysAgo },
+      userId,
+      status: { in: ['waiting', 'snoozed'] },
     },
-    orderBy: { receivedAt: 'desc' },
-    select: {
-      id: true,
-      userId: true,
-      threadId: true,
-      subject: true,
-      recipients: true,
-      receivedAt: true,
-      followUp: true,
+    include: {
+      email: true,
+    },
+    orderBy: {
+      remindAt: 'asc',
     },
   });
+}
 
-  const newlyFlagged = [];
+/**
+ * Snooze a follow-up.
+ */
+async function snoozeFollowUp(id, userId, days) {
+  const snoozeMs = days * 24 * 60 * 60 * 1000;
+  const newRemindAt = new Date(Date.now() + snoozeMs);
 
-  for (const email of sentEmails) {
-    const threadId = email.threadId;
-    if (!threadId) {
-      continue;
-    }
+  return await prisma.followUp.updateMany({
+    where: { id, userId },
+    data: {
+      status: 'snoozed',
+      remindAt: newRemindAt,
+      snoozedUntil: newRemindAt,
+    },
+  });
+}
 
-    const [replyAfterSent, newerSentEmail] = await Promise.all([
-      prisma.email.findFirst({
-        where: {
-          threadId,
-          isSent: false,
-          receivedAt: { gt: email.receivedAt },
-        },
-        select: { id: true },
-      }),
-      prisma.email.findFirst({
-        where: {
-          threadId,
-          isSent: true,
-          receivedAt: { gt: email.receivedAt },
-        },
-        select: { id: true },
-      }),
-    ]);
-
-    const shouldFollowUp =
-      !replyAfterSent &&
-      !newerSentEmail &&
-      (Date.now() - new Date(email.receivedAt).getTime()) / (1000 * 60 * 60 * 24) >= FOLLOW_UP_DAYS;
-
-    if (shouldFollowUp && !email.followUp) {
-      const updated = await prisma.email.update({
-        where: { id: email.id },
-        data: {
-          followUp: true,
-          followUpAt: new Date(),
-        },
-      });
-
-      newlyFlagged.push(updated);
-    }
-
-    if (!shouldFollowUp && email.followUp) {
-      await prisma.email.update({
-        where: { id: email.id },
-        data: {
-          followUp: false,
-          followUpAt: null,
-        },
-      });
-    }
-  }
-
-  if (io && newlyFlagged.length) {
-    const byUser = new Map();
-    newlyFlagged.forEach((email) => {
-      if (!byUser.has(email.userId)) {
-        byUser.set(email.userId, []);
-      }
-      byUser.get(email.userId).push(email);
-    });
-
-    byUser.forEach((emails, userId) => {
-      emitFollowUpNotifications(io, userId, emails);
-    });
-  }
-
-  return newlyFlagged;
+/**
+ * Dismiss a follow-up.
+ */
+async function dismissFollowUp(id, userId) {
+  return await prisma.followUp.updateMany({
+    where: { id, userId },
+    data: {
+      status: 'dismissed',
+    },
+  });
 }
 
 module.exports = {
-  FOLLOW_UP_DAYS,
-  detectFollowUps,
+  detectAndCreateFollowUp,
+  resolveFollowUpIfReplied,
+  getActiveFollowUps,
+  snoozeFollowUp,
+  dismissFollowUp,
 };

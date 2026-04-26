@@ -4,6 +4,7 @@ import { aiAPI, emailAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import EmailCard from '../components/EmailCard';
 import ActionItemsPanel from '../components/ActionItemsPanel';
+import WaitingList from '../components/WaitingList';
 import { connectSocket, disconnectSocket } from '../services/socket';
 
 const sortByNewest = (items) =>
@@ -355,8 +356,13 @@ const Dashboard = () => {
           </div>
         )}
 
-        <div style={{ marginTop: '2rem' }}>
-          <ActionItemsPanel />
+        <div className="bento-grid" style={{ marginTop: '2rem' }}>
+          <div className="bento-col-6">
+            <ActionItemsPanel />
+          </div>
+          <div className="bento-col-6">
+            <WaitingList />
+          </div>
         </div>
 
       </div>

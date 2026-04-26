@@ -6,6 +6,7 @@ const { extractTasksWithAI } = require('./taskExtractor');
 const { refreshThreadIntelligence } = require('./threadService');
 const { extractBatchActionItems } = require('./actionItemService');
 const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
+const { detectAndCreateFollowUp, resolveFollowUpIfReplied } = require('./followUpService');
 
 const activeSyncs = new Map();
 
@@ -50,6 +51,7 @@ function extractBody(payload) {
 }
 
 function parseName(sender = '') {
+  if (!sender) return '';
   const match = sender.match(/^(.*?)(<.+>)$/);
   return match ? match[1].replace(/["']/g, '').trim() : sender;
 }
@@ -212,6 +214,18 @@ async function persistEmail(userId, payload, existingEmail) {
 
   const aiContent = buildAIEmailContent(payload);
 
+  if (payload.threadId) {
+    await prisma.thread.upsert({
+      where: { id: payload.threadId },
+      update: { lastReceivedAt: payload.receivedAt },
+      create: {
+        id: payload.threadId,
+        userId,
+        lastReceivedAt: payload.receivedAt,
+      },
+    });
+  }
+
   if (existingEmail) {
     const updateData = {
       ...syncedFields,
@@ -256,6 +270,20 @@ async function persistEmail(userId, payload, existingEmail) {
     tasks = extractedTasks;
   }
 
+  if (payload.threadId) {
+    await prisma.thread.upsert({
+      where: { id: payload.threadId },
+      update: { lastReceivedAt: payload.receivedAt },
+      create: {
+        id: payload.threadId,
+        userId,
+        lastReceivedAt: payload.receivedAt,
+        priority: priority || 'normal',
+        category: category || 'general',
+      },
+    });
+  }
+
   try {
     const email = await prisma.email.create({
       data: {
@@ -270,6 +298,13 @@ async function persistEmail(userId, payload, existingEmail) {
         actionRequired,
       },
     });
+
+    // Handle Auto Follow-up logic
+    if (email.isSent) {
+      void detectAndCreateFollowUp(email, userId);
+    } else if (email.threadId) {
+      void resolveFollowUpIfReplied(userId, email.threadId, email);
+    }
 
     return { email, isNew: true };
   } catch (error) {

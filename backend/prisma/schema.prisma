@@ -33,6 +33,7 @@ model User {
   aiTraining       AITraining[]
   emailAccounts    EmailAccount[]
   stats            UserStats?
+  followUps        FollowUp[]
 
   @@map("users")
 }
@@ -89,6 +90,7 @@ model Email {
   account        EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
   aiLogs         AILog[]
   actionItems    ActionItem[]
+  followUps      FollowUp[]
 
   @@index([userId, createdAt])
   @@index([userId, category])
@@ -192,4 +194,26 @@ model ActionItem {
 
   @@index([userId, status, dueDate])
   @@map("action_items")
+}
+
+model FollowUp {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  sentEmailId     String    @map("sent_email_id")
+  threadId        String    @map("thread_id")
+  recipientEmail  String    @map("recipient_email")
+  subject         String
+  sentAt          DateTime  @map("sent_at")
+  remindAt        DateTime  @map("remind_at")
+  replyReceivedAt DateTime? @map("reply_received_at")
+  status          String    @default("waiting") // waiting | replied | snoozed | dismissed
+  snoozedUntil    DateTime? @map("snoozed_until")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email           Email     @relation(fields: [sentEmailId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, remindAt])
+  @@map("follow_ups")
 }

@@ -79,6 +79,7 @@ model Email {
   followUpAt     DateTime? @map("follow_up_at")
   receivedAt     DateTime  @default(now()) @map("received_at")
   isRead         Boolean   @default(false) @map("is_read")
+  searchVector   Unsupported("tsvector")? @map("search_vector")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 

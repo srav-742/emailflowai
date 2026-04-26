@@ -283,26 +283,19 @@ const searchEmails = async (req, res) => {
 
     const offset = (Number(page) - 1) * Number(limit);
     const emails = await prisma.$queryRaw`
-      SELECT * FROM "Email"
+      SELECT *,
+        ts_rank(search_vector, plainto_tsquery('english', ${q})) AS rank
+      FROM emails
       WHERE "userId" = ${req.user.id}
-      AND (
-        to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(body, '')) 
-        @@ websearch_to_tsquery('english', ${q})
-      )
-      ORDER BY ts_rank(
-        to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(body, '')), 
-        websearch_to_tsquery('english', ${q})
-      ) DESC
+      AND search_vector @@ plainto_tsquery('english', ${q})
+      ORDER BY rank DESC, "received_at" DESC
       LIMIT ${Number(limit)} OFFSET ${offset}
     `;
 
     const countResult = await prisma.$queryRaw`
-      SELECT count(*)::int as count FROM "Email"
+      SELECT count(*)::int as count FROM emails
       WHERE "userId" = ${req.user.id}
-      AND (
-        to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(body, '')) 
-        @@ websearch_to_tsquery('english', ${q})
-      )
+      AND search_vector @@ plainto_tsquery('english', ${q})
     `;
 
     const total = countResult[0]?.count || 0;

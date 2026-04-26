@@ -90,7 +90,10 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
   ]);
 
   useEffect(() => {
-    fetchEmails();
+    const timer = setTimeout(() => {
+      fetchEmails();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [fetchEmails]);
 
   // 2. Fallback: Socket.IO for older browser support or specific event types

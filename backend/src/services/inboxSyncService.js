@@ -4,6 +4,7 @@ const { analyzeEmailIntelligence } = require('../utils/classifier');
 const { classifyEmail: xaiClassify, summarizeEmail: xaiSummarize } = require('../utils/xai');
 const { extractTasksWithAI } = require('./taskExtractor');
 const { refreshThreadIntelligence } = require('./threadService');
+const { extractBatchActionItems } = require('./actionItemService');
 const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
 
 const activeSyncs = new Map();
@@ -400,6 +401,11 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
       // Refresh thread intelligence for new threads
       const affectedThreadIds = [...new Set(newEmails.map(e => e.threadId).filter(Boolean))];
       await Promise.allSettled(affectedThreadIds.map(tid => refreshThreadIntelligence(tid, userId)));
+
+      // Auto-extract action items for new emails
+      void extractBatchActionItems(newEmails.map(e => e.id), userId).catch(err => {
+        console.error('[Sync] Auto-extraction failed:', err.message);
+      });
     }
 
     const sortedEmails = sortEmailsByNewest(syncedEmails);

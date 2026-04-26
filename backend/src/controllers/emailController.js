@@ -2,6 +2,7 @@ const prisma = require('../config/database');
 const { analyzeEmailIntelligence, generateSummary } = require('../utils/classifier');
 const { summarizeBatchEmails, generateReply, XAI_MODEL } = require('../utils/xai');
 const { extractTasksWithAI } = require('../services/taskExtractor');
+const { extractAndSaveActionItems } = require('../services/actionItemService');
 const { getAuthenticatedUser, syncInbox } = require('../services/inboxSyncService');
 const { trackAIAction } = require('../services/analyticsService');
 const { getOrCreateStyleProfile, refreshStyleProfileIfReady } = require('../services/styleService');
@@ -427,6 +428,11 @@ const extractEmailTasks = async (req, res) => {
         response: JSON.stringify(tasks),
         model: XAI_MODEL,
       },
+    });
+
+    // Also populate the new ActionItem table
+    await extractAndSaveActionItems(email.id, req.user.id).catch(err => {
+      console.error('[Controller] ActionItem persistence failed:', err.message);
     });
 
     await logAIUsage(req.user.id, { aiActions: 1, timeSaved: 2 });

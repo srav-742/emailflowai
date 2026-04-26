@@ -9,6 +9,7 @@ const emailRoutes = require('./routes/emailRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const streamRoutes = require('./routes/streamRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const actionItemRoutes = require('./routes/actionItemRoutes');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
 const { getUserSocketRoom } = require('./utils/socketRooms');
@@ -144,6 +145,7 @@ app.use('/api/emails', emailRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/action-items', actionItemRoutes);
 
 app.get('/api/health', async (req, res) => {
   let database = 'disconnected';

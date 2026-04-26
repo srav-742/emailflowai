@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { aiAPI, emailAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import EmailCard from '../components/EmailCard';
+import ActionItemsPanel from '../components/ActionItemsPanel';
 import { connectSocket, disconnectSocket } from '../services/socket';
 
 const sortByNewest = (items) =>
@@ -353,6 +354,10 @@ const Dashboard = () => {
              </div>
           </div>
         )}
+
+        <div style={{ marginTop: '2rem' }}>
+          <ActionItemsPanel />
+        </div>
 
       </div>
     </div>

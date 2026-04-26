@@ -57,4 +57,11 @@ export const aiAPI = {
   getInboxSummary:   (limit = 20) => api.get('/ai/inbox-summary', { params: { limit } }),
 };
 
+export const actionItemAPI = {
+  getItems: (params = {}) => api.get('/action-items', { params }),
+  updateItem: (id, data) => api.patch(`/action-items/${id}`, data),
+  deleteItem: (id) => api.delete(`/action-items/${id}`),
+  extractFromEmail: (emailId) => api.post(`/action-items/${emailId}/extract`),
+};
+
 export default api;

@@ -29,6 +29,7 @@ model User {
   emails           Email[]
   threads          Thread[]
   aiLogs           AILog[]
+  actionItems      ActionItem[]
   aiTraining       AITraining[]
   emailAccounts    EmailAccount[]
   stats            UserStats?
@@ -87,6 +88,7 @@ model Email {
   thread         Thread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
   account        EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
   aiLogs         AILog[]
+  actionItems    ActionItem[]
 
   @@index([userId, createdAt])
   @@index([userId, category])
@@ -169,4 +171,25 @@ model AILog {
   @@index([userId])
   @@index([actionType])
   @@map("ai_logs")
+}
+
+model ActionItem {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  emailId      String    @map("email_id")
+  threadId     String?   @map("thread_id")
+  title        String
+  description  String?   @db.Text
+  assignee     String?   // me | sender | other
+  dueDate      DateTime? @map("due_date")
+  priority     String    @default("medium") // high | medium | low
+  status       String    @default("pending") // pending | done | dismissed
+  extractedAt  DateTime  @default(now()) @map("extracted_at")
+  completedAt  DateTime? @map("completed_at")
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email        Email     @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, dueDate])
+  @@map("action_items")
 }

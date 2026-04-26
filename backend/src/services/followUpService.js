@@ -114,10 +114,38 @@ async function dismissFollowUp(id, userId) {
   });
 }
 
+/**
+ * Main entry point for background follow-up automation.
+ */
+async function detectFollowUps(io) {
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        OR: [
+          { accessToken: { not: null } },
+          { refreshToken: { not: null } },
+        ],
+      },
+    });
+
+    const results = [];
+    for (const user of users) {
+      // For now, this is just a hook. 
+      // The real detection happens during sync in inboxSyncService.
+      // We could add logic here to re-activate snoozed items or similar.
+    }
+    return results;
+  } catch (error) {
+    console.error('[FollowUpService] detectFollowUps failed:', error.message);
+    return [];
+  }
+}
+
 module.exports = {
   detectAndCreateFollowUp,
   resolveFollowUpIfReplied,
   getActiveFollowUps,
   snoozeFollowUp,
   dismissFollowUp,
+  detectFollowUps,
 };

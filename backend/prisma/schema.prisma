@@ -34,6 +34,8 @@ model User {
   emailAccounts    EmailAccount[]
   stats            UserStats?
   followUps        FollowUp[]
+  digests          DailyDigest[]
+  digestPreference DigestPreference?
 
   @@map("users")
 }
@@ -216,4 +218,37 @@ model FollowUp {
 
   @@index([userId, status, remindAt])
   @@map("follow_ups")
+}
+
+model DailyDigest {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  digestDate   DateTime @map("digest_date")
+  scheduledAt  DateTime @map("scheduled_at")
+  deliveredAt  DateTime? @map("delivered_at")
+  content      Json     // { emails[], actions[], followups[] }
+  emailSent    Boolean  @default(false) @map("email_sent")
+  openedAt     DateTime? @map("opened_at")
+  status       String   @default("pending") // pending | sent | failed
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, digestDate])
+  @@map("daily_digests")
+}
+
+model DigestPreference {
+  id               String   @id @default(uuid())
+  userId           String   @unique @map("user_id")
+  sendTime         String   @default("07:30") @map("send_time")
+  timezone         String   @default("UTC")
+  emailEnabled     Boolean  @default(true) @map("email_enabled")
+  includeActions   Boolean  @default(true) @map("include_actions")
+  includeFollowups Boolean  @default(true) @map("include_followups")
+  includeCalendar  Boolean  @default(true) @map("include_calendar")
+  maxEmails        Int      @default(5) @map("max_emails")
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("digest_preferences")
 }

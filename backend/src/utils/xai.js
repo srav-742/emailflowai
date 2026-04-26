@@ -494,6 +494,40 @@ const checkReplyRequired = async (emailContent) => {
   }
 };
 
+const summarizeDailyDigest = async (data) => {
+  const prompt = `Generate a motivating morning brief based on this data:
+  - Emails: ${JSON.stringify(data.emails)}
+  - Action Items: ${JSON.stringify(data.actions)}
+  - Follow-ups: ${JSON.stringify(data.followups)}
+  
+  Focus on:
+  1. What is the most important thing today?
+  2. Summary of key unread emails.
+  3. Urgent tasks or follow-ups.
+  
+  Keep it concise, professional, and helpful. 
+  Return ONLY a valid JSON:
+  {
+    "brief": "A 2-3 sentence overall summary",
+    "topPriority": "The single most important task or email",
+    "emailSummary": "1 sentence summarizing the inbox state",
+    "actionSummary": "1 sentence on tasks"
+  }`;
+
+  try {
+    const result = await requestGroq([
+      { role: 'system', content: 'You are a Chief of Staff providing a morning briefing.' },
+      { role: 'user', content: prompt }
+    ]);
+
+    const json = extractJsonBlock(result) || '{"brief":"Your digest is ready.","topPriority":"Check your inbox","emailSummary":"New emails waiting","actionSummary":"Tasks pending"}';
+    return JSON.parse(json);
+  } catch (error) {
+    console.error('[XAI] summarizeDailyDigest error:', error.message);
+    return { brief: "Error generating brief", topPriority: "N/A", emailSummary: "N/A", actionSummary: "N/A" };
+  }
+};
+
 module.exports = {
   summarizeBatchEmails,
   generateReply,
@@ -501,6 +535,7 @@ module.exports = {
   summarizeThread,
   classifyEmail,
   checkReplyRequired,
+  summarizeDailyDigest,
   requestGroq,
   XAI_MODEL
 };

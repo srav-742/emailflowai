@@ -10,6 +10,9 @@ const aiRoutes = require('./routes/aiRoutes');
 const streamRoutes = require('./routes/streamRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const actionItemRoutes = require('./routes/actionItemRoutes');
+const followUpRoutes = require('./routes/followUpRoutes');
+const digestRoutes = require('./routes/digestRoutes');
+const digestService = require('./services/digestService');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
 const { getUserSocketRoom } = require('./utils/socketRooms');
@@ -147,6 +150,12 @@ app.use('/api/stream', streamRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/action-items', actionItemRoutes);
 app.use('/api/follow-ups', followUpRoutes);
+app.use('/api/digest', digestRoutes);
+
+// Start background digest scheduler (check every 15 mins)
+setInterval(() => {
+  digestService.checkAndTriggerDigests().catch(console.error);
+}, 15 * 60 * 1000);
 
 app.get('/api/health', async (req, res) => {
   let database = 'disconnected';

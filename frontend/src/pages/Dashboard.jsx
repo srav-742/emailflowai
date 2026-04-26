@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import EmailCard from '../components/EmailCard';
 import ActionItemsPanel from '../components/ActionItemsPanel';
 import WaitingList from '../components/WaitingList';
+import MorningBriefCard from '../components/MorningBriefCard';
 import { connectSocket, disconnectSocket } from '../services/socket';
 
 const sortByNewest = (items) =>
@@ -238,6 +239,8 @@ const Dashboard = () => {
             </div>
           </div>
         )}
+        
+        <MorningBriefCard />
 
         <div className="surface-card" style={{ 
             background: 'var(--panel-elevated)', 

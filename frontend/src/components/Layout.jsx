@@ -14,6 +14,7 @@ const shellNavItems = [
   { path: '/read-later', label: 'Read Later', kicker: 'When you have time' },
   { path: '/newsletters', label: 'Newsletters', kicker: 'Favorite publications' },
   { path: '/waiting', label: 'Waiting for Reply', kicker: 'Expectations' },
+  { path: '/settings/digest', label: 'Digest Settings', kicker: 'Personalization' },
 ];
 
 const pageTitles = {
@@ -28,6 +29,7 @@ const pageTitles = {
   '/read-later': 'Read Later',
   '/newsletters': 'Newsletters',
   '/waiting': 'Waiting for Reply',
+  '/settings/digest': 'Morning Brief Settings',
 };
 
 const pageDescriptions = {
@@ -42,6 +44,7 @@ const pageDescriptions = {
   '/read-later': 'A collection of interesting content and threads you saved for later.',
   '/newsletters': 'Cleaned and separated newsletter feeds to reduce inbox noise.',
   '/waiting': 'Threads where you sent a message and are still waiting for a response.',
+  '/settings/digest': 'Customize your daily AI-powered intelligence summary.',
 };
 
 const Layout = () => {

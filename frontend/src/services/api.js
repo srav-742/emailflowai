@@ -70,4 +70,10 @@ export const followUpAPI = {
   dismiss: (id) => api.patch(`/follow-ups/${id}/dismiss`),
 };
 
+export const digestAPI = {
+  getToday: () => api.get('/digest/today'),
+  getPreferences: () => api.get('/digest/preferences'),
+  updatePreferences: (data) => api.patch('/digest/preferences', data),
+};
+
 export default api;

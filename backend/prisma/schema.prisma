@@ -39,6 +39,7 @@ model User {
   subscription     Subscription?
   analyticsEvents  AnalyticsEvent[]
   analyticsDaily   AnalyticsDaily[]
+  calendarEvents   CalendarEvent[]
 
   @@map("users")
 }
@@ -309,4 +310,24 @@ model AnalyticsDaily {
   @@id([userId, date])
   @@index([date])
   @@map("analytics_daily")
+}
+
+model CalendarEvent {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  googleEventId   String   @map("google_event_id")
+  calendarId      String   @map("calendar_id")
+  title           String
+  description     String?  @db.Text
+  startTime       DateTime @map("start_time")
+  endTime         DateTime @map("end_time")
+  attendees       Json?    // Array of { email, name, response_status }
+  meetingLink     String?  @map("meeting_link")
+  linkedEmailId   String?  @map("linked_email_id")
+  syncedAt        DateTime @default(now()) @map("synced_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, googleEventId])
+  @@map("calendar_events")
 }

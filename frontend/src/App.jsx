@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import EmailList from './pages/EmailList';
 import PricingPage from './pages/PricingPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import CalendarPage from './pages/CalendarPage';
 import DigestSettings from './pages/Settings/DigestSettings';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
@@ -89,6 +90,7 @@ function App() {
           <Route path="read-later" element={<EmailList title="Read Later" description="Interesting content saved for when you have more time." filter={{ categoryIn: ['newsletter', 'social'], priority: 'low' }} />} />
           <Route path="newsletters" element={<EmailList title="Newsletters" description="Latest updates from your favorite publications." filter={{ category: 'newsletter' }} />} />
           <Route path="waiting" element={<EmailList title="Waiting for Reply" description="Emails where you are expecting a response." filter={{ followUp: true }} />} />
+          <Route path="calendar" element={<CalendarPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="settings/digest" element={<DigestSettings />} />
           <Route path="pricing" element={<PricingPage />} />

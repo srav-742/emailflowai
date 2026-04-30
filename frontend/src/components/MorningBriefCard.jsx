@@ -87,6 +87,15 @@ const MorningBriefCard = () => {
               {ai.actionSummary}
             </p>
           </div>
+
+          <div style={{ flex: 1 }}>
+             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700, display: 'block', marginBottom: '0.5rem' }}>
+              📅 Today's Schedule
+            </span>
+            <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-dim)' }}>
+              {ai.scheduleSummary || 'No meetings scheduled today.'}
+            </p>
+          </div>
         </div>
       </div>
     </div>

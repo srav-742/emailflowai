@@ -12,7 +12,7 @@ async function generateDailyDigest(userId) {
     tomorrow.setDate(today.getDate() + 1);
 
     // 1. Gather Data
-    const [emails, actions, followups, preferences] = await Promise.all([
+    const [emails, actions, followups, calendarEvents, preferences] = await Promise.all([
       // Unread important emails from last 24h
       prisma.email.findMany({
         where: {
@@ -41,6 +41,14 @@ async function generateDailyDigest(userId) {
         },
         select: { recipientEmail: true, subject: true, remindAt: true }
       }),
+      // Today's Calendar Events
+      prisma.calendarEvent.findMany({
+        where: {
+          userId,
+          startTime: { gte: today, lt: tomorrow }
+        },
+        select: { title: true, startTime: true, meetingLink: true }
+      }),
       // User preferences
       prisma.digestPreference.upsert({
         where: { userId },
@@ -50,7 +58,7 @@ async function generateDailyDigest(userId) {
     ]);
 
     // 2. AI Summarization
-    const aiBrief = await summarizeDailyDigest({ emails, actions, followups });
+    const aiBrief = await summarizeDailyDigest({ emails, actions, followups, calendarEvents });
 
     // 3. Persist Digest
     const digest = await prisma.dailyDigest.upsert({
@@ -62,7 +70,7 @@ async function generateDailyDigest(userId) {
       },
       update: {
         content: {
-          raw: { emails, actions, followups },
+          raw: { emails, actions, followups, calendarEvents },
           ai: aiBrief
         },
         status: 'sent',
@@ -75,7 +83,7 @@ async function generateDailyDigest(userId) {
         deliveredAt: new Date(),
         status: 'sent',
         content: {
-          raw: { emails, actions, followups },
+          raw: { emails, actions, followups, calendarEvents },
           ai: aiBrief
         }
       }

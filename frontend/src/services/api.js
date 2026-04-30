@@ -84,4 +84,11 @@ export const billingAPI = {
   getSubscription: () => api.get('/billing/subscription'),
 };
 
+export const calendarAPI = {
+  sync: () => api.post('/calendar/sync'),
+  getEvents: (days = 7) => api.get('/calendar/events', { params: { days } }),
+  getToday: () => api.get('/calendar/today'),
+  addReminder: (actionItemId) => api.post('/calendar/add-reminder', { actionItemId }),
+};
+
 export default api;

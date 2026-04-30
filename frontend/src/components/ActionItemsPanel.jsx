@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { actionItemAPI } from '../services/api';
+import { actionItemAPI, calendarAPI } from '../services/api';
 
 const ActionItemsPanel = () => {
   const [items, setItems] = useState([]);
@@ -29,6 +29,16 @@ const ActionItemsPanel = () => {
       fetchItems();
     } catch (error) {
       console.error('Failed to update item:', error);
+    }
+  };
+
+  const handleAddToCalendar = async (id) => {
+    try {
+      await calendarAPI.addReminder(id);
+      alert('Task added to Google Calendar!');
+    } catch (error) {
+      console.error('Failed to add to calendar:', error);
+      alert('Failed to add to calendar. Please ensure your Google account is connected with Calendar permissions.');
     }
   };
 
@@ -130,9 +140,27 @@ const ActionItemsPanel = () => {
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     {item.dueDate ? (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>
-                        📅 {new Date(item.dueDate).toLocaleDateString()}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>
+                          📅 {new Date(item.dueDate).toLocaleDateString()}
+                        </span>
+                        {item.status !== 'done' && (
+                          <button 
+                            onClick={() => handleAddToCalendar(item.id)}
+                            style={{ 
+                              background: 'rgba(99, 102, 241, 0.1)', 
+                              border: '1px solid rgba(99, 102, 241, 0.2)',
+                              color: '#818cf8',
+                              padding: '0.2rem 0.5rem',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Add to Calendar
+                          </button>
+                        )}
+                      </div>
                     ) : <span />}
                     
                     <button 

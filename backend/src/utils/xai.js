@@ -499,19 +499,22 @@ const summarizeDailyDigest = async (data) => {
   - Emails: ${JSON.stringify(data.emails)}
   - Action Items: ${JSON.stringify(data.actions)}
   - Follow-ups: ${JSON.stringify(data.followups)}
+  - Calendar Events: ${JSON.stringify(data.calendarEvents)}
   
   Focus on:
-  1. What is the most important thing today?
+  1. What is the most important thing today? (Check calendar for meetings!)
   2. Summary of key unread emails.
   3. Urgent tasks or follow-ups.
+  4. Your schedule for today.
   
   Keep it concise, professional, and helpful. 
   Return ONLY a valid JSON:
   {
     "brief": "A 2-3 sentence overall summary",
-    "topPriority": "The single most important task or email",
+    "topPriority": "The single most important task, email, or meeting",
     "emailSummary": "1 sentence summarizing the inbox state",
-    "actionSummary": "1 sentence on tasks"
+    "actionSummary": "1 sentence on tasks",
+    "scheduleSummary": "1 sentence summarizing today's meetings"
   }`;
 
   try {
@@ -520,11 +523,11 @@ const summarizeDailyDigest = async (data) => {
       { role: 'user', content: prompt }
     ]);
 
-    const json = extractJsonBlock(result) || '{"brief":"Your digest is ready.","topPriority":"Check your inbox","emailSummary":"New emails waiting","actionSummary":"Tasks pending"}';
+    const json = extractJsonBlock(result) || '{"brief":"Your digest is ready.","topPriority":"Check your inbox","emailSummary":"New emails waiting","actionSummary":"Tasks pending","scheduleSummary":"No meetings scheduled today"}';
     return JSON.parse(json);
   } catch (error) {
     console.error('[XAI] summarizeDailyDigest error:', error.message);
-    return { brief: "Error generating brief", topPriority: "N/A", emailSummary: "N/A", actionSummary: "N/A" };
+    return { brief: "Error generating brief", topPriority: "N/A", emailSummary: "N/A", actionSummary: "N/A", scheduleSummary: "N/A" };
   }
 };
 

@@ -156,6 +156,7 @@ app.use('/api/follow-ups', followUpRoutes);
 app.use('/api/digest', digestRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
+app.use('/api/calendar', require('./routes/calendarRoutes'));
 
 // Run analytics aggregation once a day (simulated cron)
 setInterval(() => {

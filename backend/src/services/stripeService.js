@@ -60,9 +60,12 @@ const handleWebhook = async (event) => {
       break;
     }
     case 'customer.subscription.updated':
-    case 'customer.subscription.deleted': {
-      const subscription = data.object;
-      await updateSubscription(subscription.customer, subscription.id);
+    case 'customer.subscription.deleted':
+    case 'invoice.payment_failed': {
+      const obj = data.object;
+      const customerId = obj.customer;
+      const subscriptionId = obj.subscription || obj.id;
+      await updateSubscription(customerId, subscriptionId);
       break;
     }
     default:

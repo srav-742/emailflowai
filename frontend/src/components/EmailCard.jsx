@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { emailAPI } from '../services/api';
+import { useBilling } from '../context/BillingContext';
 import ReplyGenerator from './ReplyGenerator';
 
 const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isThreadHead = false, isThreaded = false }) => {
+  const { triggerUpgradeModal } = useBilling();
   const [expanded, setExpanded] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [classifying, setClassifying] = useState(false);
@@ -43,7 +45,11 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
       await emailAPI.aiSummarize(email.id);
       if (onUpdate) onUpdate();
     } catch (error) {
-      console.error('AI summarize error:', error);
+      if (error.response?.status === 403) {
+        triggerUpgradeModal('Deep AI Summaries');
+      } else {
+        console.error('AI summarize error:', error);
+      }
     } finally {
       setSummarizing(false);
     }
@@ -55,7 +61,11 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
       await emailAPI.aiClassify(email.id);
       if (onUpdate) onUpdate();
     } catch (error) {
-      console.error('AI classify error:', error);
+      if (error.response?.status === 403) {
+        triggerUpgradeModal('AI Classification');
+      } else {
+        console.error('AI classify error:', error);
+      }
     } finally {
       setClassifying(false);
     }

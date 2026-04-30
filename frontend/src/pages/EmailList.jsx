@@ -9,7 +9,6 @@ import ThreadCard from '../components/ThreadCard';
 import InboxTabs from '../components/InboxTabs';
 import { connectSocket } from '../services/socket';
 import './EmailList.css';
-import './InboxTabs.css';
 
 const EmailList = ({ filter = {}, title = 'Inbox command center', description = 'Review and process every thread in one place.' }) => {
   const { user, token } = useAuth();

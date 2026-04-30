@@ -3,10 +3,10 @@ import { emailAPI } from '../services/api';
 import './InboxTabs.css';
 
 const TABS = [
-  { id: 'focus_today', label: 'Focus Today', icon: '🔥' },
-  { id: 'read_later', label: 'Read Later', icon: '📚' },
-  { id: 'newsletter', label: 'Newsletters', icon: '📧' },
-  { id: 'waiting', label: 'Waiting for Reply', icon: '⏳' },
+  { id: 'focus_today', label: 'Focus Today', icon: '🔥', description: 'Urgent attention needed' },
+  { id: 'read_later', label: 'Read Later', icon: '📚', description: 'Non-urgent information' },
+  { id: 'newsletter', label: 'Newsletters', icon: '📧', description: 'Bulk & marketing' },
+  { id: 'waiting', label: 'Waiting for Reply', icon: '⏳', description: 'No response yet' },
 ];
 
 const InboxTabs = ({ activeTab, onTabChange }) => {
@@ -29,20 +29,28 @@ const InboxTabs = ({ activeTab, onTabChange }) => {
   }, []);
 
   return (
-    <div className="inbox-tabs">
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          className={`inbox-tab-item ${activeTab === tab.id ? 'active' : ''}`}
-          onClick={() => onTabChange(tab.id)}
-        >
-          <span className="tab-icon">{tab.icon}</span>
-          <span className="tab-label">{tab.label}</span>
-          {counts[tab.id] > 0 && (
-            <span className="tab-badge">{counts[tab.id]}</span>
-          )}
-        </button>
-      ))}
+    <div className="inbox-tabs-container">
+      <div className="inbox-tabs">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            className={`inbox-tab-item ${activeTab === tab.id ? 'active' : ''}`}
+            onClick={() => onTabChange(tab.id)}
+            title={tab.description}
+          >
+            <div className="tab-main">
+              <span className="tab-icon">{tab.icon}</span>
+              <div className="tab-text">
+                <span className="tab-label">{tab.label}</span>
+                <span className="tab-desc">{tab.description}</span>
+              </div>
+            </div>
+            {counts[tab.id] > 0 && (
+              <span className="tab-badge">{counts[tab.id]}</span>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 };

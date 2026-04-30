@@ -105,6 +105,7 @@ const getEmails = async (req, res) => {
     const where = {
       userId,
       ...(category ? { category: String(category) } : {}),
+      ...(category === 'focus_today' ? { receivedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } : {}),
       ...(categories.length ? { category: { in: categories } } : {}),
       ...(priority ? { priority: String(priority) } : {}),
       ...(followUp !== undefined ? { followUp: followUp === 'true' } : {}),
@@ -151,8 +152,9 @@ const getCategoryCounts = async (req, res) => {
     const cached = await redis.get(cacheKey);
     if (cached) return res.json(JSON.parse(cached));
 
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const [focusToday, readLater, newsletter, waiting] = await Promise.all([
-      prisma.email.count({ where: { userId, category: 'focus_today', isRead: false } }),
+      prisma.email.count({ where: { userId, category: 'focus_today', isRead: false, receivedAt: { gte: twentyFourHoursAgo } } }),
       prisma.email.count({ where: { userId, category: 'read_later', isRead: false } }),
       prisma.email.count({ where: { userId, category: 'newsletter', isRead: false } }),
       prisma.followUp.count({ where: { userId, status: 'waiting' } }),

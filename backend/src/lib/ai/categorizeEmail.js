@@ -57,6 +57,9 @@ async function categorizeEmail(emailData) {
     console.error('[AI Categorizer] Error:', error);
   }
 
+  return { category: 'other', confidence: 0 };
+}
+
 /**
  * Categorizes a batch of emails for better efficiency.
  * @param {Array} emailsData Array of { id, from, subject, snippet }

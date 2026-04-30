@@ -42,10 +42,10 @@ router.post('/:id/summarize', summarizeEmail);
 router.post('/:id/extract-tasks', extractEmailTasks);
 router.post('/:id/reply/send', sendReply);
 
-// AI-Powered Routes (Groq) - Gated by Plan (Relaxed for now to avoid 403)
-router.post('/ai/process-all', planGating(['pro', 'basic', 'free']), aiProcessAll);
+// AI-Powered Routes (Groq) - Gated by Plan
+router.post('/ai/process-all', planGating(['pro']), aiProcessAll);
 router.post('/ai/:id/summarize', planGating(['pro']), aiSummarize);
-router.post('/ai/:id/classify', planGating(['pro', 'basic']), aiClassify);
+router.post('/ai/:id/classify', planGating(['pro']), aiClassify);
 router.post('/ai/:id/reply', planGating(['pro']), aiGenerateReply);
 
 module.exports = router;

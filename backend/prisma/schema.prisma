@@ -37,6 +37,8 @@ model User {
   digests          DailyDigest[]
   digestPreference DigestPreference?
   subscription     Subscription?
+  analyticsEvents  AnalyticsEvent[]
+  analyticsDaily   AnalyticsDaily[]
 
   @@map("users")
 }
@@ -277,4 +279,34 @@ model Subscription {
   @@index([stripeCustomerId])
   @@index([currentPeriodEnd])
   @@map("subscriptions")
+}
+
+model AnalyticsEvent {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  eventType        String   @map("event_type") // email_processed | action_completed | followup_sent | digest_opened
+  metadata         Json?    @map("metadata") // { email_id, time_saved_seconds, category }
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("analytics_events")
+}
+
+model AnalyticsDaily {
+  userId           String   @map("user_id")
+  date             DateTime @map("date") // Day being summarized (midnight)
+  emailsProcessed  Int      @default(0) @map("emails_processed")
+  actionsCompleted Int      @default(0) @map("actions_completed")
+  followupsSent    Int      @default(0) @map("followups_sent")
+  timeSavedSeconds Int      @default(0) @map("time_saved_seconds")
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, date])
+  @@index([date])
+  @@map("analytics_daily")
 }

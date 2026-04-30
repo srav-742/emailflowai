@@ -1,107 +1,151 @@
 const prisma = require('../config/database');
 
-async function ensureUserStats(userId) {
-  return prisma.userStats.upsert({
-    where: { userId },
-    update: {},
-    create: { userId },
-  });
+/**
+ * Track a granular analytics event.
+ */
+async function trackEvent(userId, eventType, metadata = {}) {
+  try {
+    // Determine time saved based on event type
+    let timeSavedSeconds = 0;
+    if (eventType === 'email_processed') timeSavedSeconds = 30;
+    if (eventType === 'action_completed') timeSavedSeconds = 60;
+    if (eventType === 'followup_sent') timeSavedSeconds = 120;
+    if (eventType === 'digest_opened') timeSavedSeconds = 300;
+
+    const data = {
+      userId,
+      eventType,
+      metadata: { ...metadata, timeSavedSeconds }
+    };
+
+    return await prisma.analyticsEvent.create({ data });
+  } catch (error) {
+    console.error('[Analytics] trackEvent failed:', error.message);
+  }
 }
 
-async function trackEmailProcessing(userId, count = 1) {
-  await ensureUserStats(userId);
+/**
+ * Aggregate yesterday's events into the daily stats table.
+ */
+async function aggregateDailyStats(targetDate = new Date()) {
+  try {
+    const yesterday = new Date(targetDate);
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0);
 
-  return prisma.userStats.update({
-    where: { userId },
-    data: {
-      emailsProcessed: {
-        increment: Math.max(0, count),
+    const nextDay = new Date(yesterday);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    // Get all events for yesterday
+    const events = await prisma.analyticsEvent.findMany({
+      where: {
+        createdAt: {
+          gte: yesterday,
+          lt: nextDay,
+        },
       },
+    });
+
+    // Group by user
+    const userGroups = events.reduce((acc, event) => {
+      if (!acc[event.userId]) {
+        acc[event.userId] = {
+          emailsProcessed: 0,
+          actionsCompleted: 0,
+          followupsSent: 0,
+          timeSavedSeconds: 0,
+        };
+      }
+      
+      const meta = event.metadata || {};
+      acc[event.userId].timeSavedSeconds += meta.timeSavedSeconds || 0;
+
+      if (event.eventType === 'email_processed') acc[event.userId].emailsProcessed++;
+      if (event.eventType === 'action_completed') acc[event.userId].actionsCompleted++;
+      if (event.eventType === 'followup_sent') acc[event.userId].followupsSent++;
+      
+      return acc;
+    }, {});
+
+    // Upsert into AnalyticsDaily
+    const promises = Object.entries(userGroups).map(([userId, stats]) => {
+      return prisma.analyticsDaily.upsert({
+        where: {
+          userId_date: { userId, date: yesterday }
+        },
+        update: stats,
+        create: {
+          userId,
+          date: yesterday,
+          ...stats
+        }
+      });
+    });
+
+    await Promise.all(promises);
+    console.log(`[Analytics] Aggregated stats for ${yesterday.toDateString()} (${promises.length} users)`);
+  } catch (error) {
+    console.error('[Analytics] Daily aggregation failed:', error.message);
+  }
+}
+
+/**
+ * Get 30-day summary for a user.
+ */
+async function getSummary(userId) {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const dailyStats = await prisma.analyticsDaily.findMany({
+    where: {
+      userId,
+      date: { gte: thirtyDaysAgo }
     },
+    orderBy: { date: 'asc' }
   });
-}
 
-async function trackAIAction(userId, options = {}) {
-  const aiActions = Math.max(0, options.aiActions ?? 1);
-  const timeSaved = Math.max(0, options.timeSaved ?? 2);
-
-  await ensureUserStats(userId);
-
-  return prisma.userStats.update({
-    where: { userId },
-    data: {
-      aiActions: {
-        increment: aiActions,
-      },
-      timeSaved: {
-        increment: timeSaved,
-      },
-    },
-  });
-}
-
-async function getAnalytics(userId) {
-  const stats = await ensureUserStats(userId);
-  const [totalEmails, unreadCount, followUpCount, actionRequiredCount, byCategory, byPriority, recentAI] = await Promise.all([
-    prisma.email.count({
-      where: { userId },
-    }),
-    prisma.email.count({
-      where: { userId, isRead: false },
-    }),
-    prisma.email.count({
-      where: { userId, followUp: true },
-    }),
-    prisma.email.count({
-      where: { userId, actionRequired: true },
-    }),
-    prisma.email.groupBy({
-      by: ['category'],
-      where: { userId },
-      _count: true,
-    }),
-    prisma.email.groupBy({
-      by: ['priority'],
-      where: { userId },
-      _count: true,
-    }),
-    prisma.aILog.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-      select: {
-        actionType: true,
-        model: true,
-        createdAt: true,
-      },
-    }),
-  ]);
+  const totals = dailyStats.reduce((acc, day) => {
+    acc.emailsProcessed += day.emailsProcessed;
+    acc.actionsCompleted += day.actionsCompleted;
+    acc.followupsSent += day.followupsSent;
+    acc.timeSavedSeconds += day.timeSavedSeconds;
+    return acc;
+  }, { emailsProcessed: 0, actionsCompleted: 0, followupsSent: 0, timeSavedSeconds: 0 });
 
   return {
-    id: stats.id,
-    userId: stats.userId,
-    emailsProcessed: stats.emailsProcessed,
-    aiActions: stats.aiActions,
-    timeSaved: stats.timeSaved,
-    totalEmails,
-    unreadCount,
-    followUpCount,
-    actionRequiredCount,
-    byCategory: byCategory.map((item) => ({
-      category: item.category,
-      count: item._count?._all ?? item._count ?? 0,
-    })),
-    byPriority: byPriority.map((item) => ({
-      priority: item.priority,
-      count: item._count?._all ?? item._count ?? 0,
-    })),
-    recentAI,
+    totals,
+    daily: dailyStats
   };
 }
 
+/**
+ * Get top senders for a user.
+ */
+async function getTopSenders(userId, limit = 10) {
+  return await prisma.email.groupBy({
+    by: ['sender', 'senderName'],
+    where: { userId },
+    _count: { _all: true },
+    orderBy: { _count: { sender: 'desc' } },
+    take: limit
+  });
+}
+
+/**
+ * Get category breakdown for a user.
+ */
+async function getCategoryBreakdown(userId) {
+  return await prisma.email.groupBy({
+    by: ['category'],
+    where: { userId },
+    _count: { _all: true }
+  });
+}
+
 module.exports = {
-  ensureUserStats,
-  trackEmailProcessing,
-  trackAIAction,
-  getAnalytics,
+  trackEvent,
+  aggregateDailyStats,
+  getSummary,
+  getTopSenders,
+  getCategoryBreakdown
 };

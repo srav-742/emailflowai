@@ -155,6 +155,13 @@ app.use('/api/action-items', actionItemRoutes);
 app.use('/api/follow-ups', followUpRoutes);
 app.use('/api/digest', digestRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/analytics', require('./routes/analyticsRoutes'));
+
+// Run analytics aggregation once a day (simulated cron)
+setInterval(() => {
+  const { aggregateDailyStats } = require('./services/analyticsService');
+  aggregateDailyStats();
+}, 24 * 60 * 60 * 1000);
 
 // Start background digest scheduler (check every 15 mins)
 setInterval(() => {

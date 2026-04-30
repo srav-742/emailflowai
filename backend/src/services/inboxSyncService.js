@@ -441,6 +441,8 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
         syncedEmails.push(result.email);
         if (result.isNew) {
           newEmails.push(result.email);
+          const { trackEvent } = require('./analyticsService');
+          trackEvent(userId, 'email_processed', { emailId: result.email.id });
         }
       } catch (error) {
         skippedMessages += 1;

@@ -17,7 +17,7 @@ async function detectAndCreateFollowUp(email, userId) {
       const sentAt = new Date(email.receivedAt);
       const remindAt = new Date(sentAt.getTime() + 3 * 24 * 60 * 60 * 1000); // Default 3 days
 
-      return await prisma.followUp.create({
+      const followUp = await prisma.followUp.create({
         data: {
           userId,
           sentEmailId: email.id,
@@ -29,6 +29,11 @@ async function detectAndCreateFollowUp(email, userId) {
           status: 'waiting',
         },
       });
+
+      const { trackEvent } = require('./analyticsService');
+      trackEvent(userId, 'followup_sent', { followUpId: followUp.id });
+
+      return followUp;
     }
   } catch (error) {
     console.error('[FollowUpService] Detection failed:', error.message);

@@ -82,6 +82,11 @@ const updateActionItem = async (req, res) => {
     if (priority) data.priority = priority;
     if (title) data.title = title;
 
+    if (status === 'done') {
+      const { trackEvent } = require('../services/analyticsService');
+      trackEvent(req.user.id, 'action_completed', { actionId: id });
+    }
+
     const updated = await prisma.actionItem.update({
       where: { id, userId: req.user.id },
       data,

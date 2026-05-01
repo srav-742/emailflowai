@@ -294,12 +294,11 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
+console.log(`[Port-Check] Attempting to bind to port ${PORT}...`);
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 [Success] Server is LIVE and listening on port ${PORT}`);
   startEmailPolling(io);
   startStyleLearningJob();
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🤖 Groq AI: ${process.env.GROQ_API_KEY ? '✅ Key loaded (' + process.env.GROQ_MODEL + ')' : '❌ GROQ_API_KEY not set!'}`);
 });
 
 module.exports = { app, io };

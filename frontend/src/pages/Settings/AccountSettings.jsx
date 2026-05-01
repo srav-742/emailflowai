@@ -1,10 +1,15 @@
 import { useState } from 'react';
 import { useAccounts } from '../../context/AccountContext';
+import { useAuth } from '../../context/AuthContext';
+import { subscribeToPush, unsubscribeFromPush } from '../../utils/pushSubscribe';
 
 const AccountSettings = () => {
   const { accounts, updateAccountSettings, disconnectAccount } = useAccounts();
+  const { token } = useAuth();
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({});
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState('Notification' in window && Notification.permission === 'granted');
 
   const handleEdit = (account) => {
     setEditingId(account.id);
@@ -18,6 +23,18 @@ const AccountSettings = () => {
   const handleSave = async (id) => {
     await updateAccountSettings(id, editData);
     setEditingId(null);
+  };
+
+  const handleTogglePush = async () => {
+    setPushLoading(true);
+    if (pushEnabled) {
+      const success = await unsubscribeFromPush(token);
+      if (success) setPushEnabled(false);
+    } else {
+      const success = await subscribeToPush(token);
+      if (success) setPushEnabled(true);
+    }
+    setPushLoading(false);
   };
 
   return (
@@ -88,6 +105,22 @@ const AccountSettings = () => {
           <button className="button button-primary" onClick={() => window.location.href = '/auth/gmail-connect'}>
             Connect New Gmail Account
           </button>
+        </div>
+
+        <div style={{ marginTop: '2rem', padding: '1.5rem', background: 'var(--panel-bg)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Browser Notifications</h3>
+              <p style={{ margin: '0.25rem 0', opacity: 0.7 }}>Get instant alerts for high-priority emails on your desktop.</p>
+            </div>
+            <button 
+              className={`button ${pushEnabled ? 'button-secondary' : 'button-primary'}`}
+              onClick={handleTogglePush}
+              disabled={pushLoading}
+            >
+              {pushLoading ? 'Processing...' : pushEnabled ? 'Disable Notifications' : 'Enable Notifications'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

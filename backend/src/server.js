@@ -17,6 +17,7 @@ const billingRoutes = require('./routes/billingRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const errorRoutes = require('./routes/errorRoutes');
 const { router: sseRouter } = require('./routes/sse');
+const pushRoutes = require('./routes/pushRoutes');
 const digestService = require('./services/digestService');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
@@ -28,6 +29,26 @@ const redis = require('./redisClient');
 
 const app = express();
 const PORT = process.env.PORT || 5050;
+
+// Health Check Endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    const prisma = require('./config/database');
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({
+      status: 'healthy',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      database: 'connected'
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'degraded',
+      error: 'Database connection failed',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 const server = http.createServer(app);
 const allowedOrigins = [
@@ -158,6 +179,7 @@ app.use('/api/digest', digestRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/errors', errorRoutes);
 app.use('/api/sse', sseRouter);
+app.use('/api/push', pushRoutes);
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/calendar', require('./routes/calendarRoutes'));
 app.use('/api/accounts', require('./routes/accountRoutes'));

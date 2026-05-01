@@ -5,8 +5,8 @@ services:
     plan: starter
     region: oregon
     rootDirectory: backend
-    buildCommand: npm ci && npx prisma generate
-    startCommand: node src/server.js
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production

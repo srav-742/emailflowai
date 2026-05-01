@@ -31,6 +31,13 @@ const { startStyleLearningJob } = require('./jobs/styleLearningJob');
 const app = express();
 const PORT = process.env.PORT || 5050;
 
+console.log('[Startup] Initializing EmailFlow AI Backend...');
+
+// Root Endpoint for Render Load Balancer
+app.get('/', (req, res) => {
+  res.json(buildApiIndex());
+});
+
 // Health Check Endpoint
 app.get('/api/health', async (req, res) => {
   try {

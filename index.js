@@ -3,6 +3,7 @@
  * This file ensures that even if Render looks in the root directory,
  * it successfully finds and starts the backend server.
  */
+console.log('🔥 [ROOT] FILE STARTED - Bridge Executing');
 console.log('🚀 [Failsafe] Booting EmailFlow AI from project root...');
 
 // Pass through to the real server logic

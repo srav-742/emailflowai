@@ -1,3 +1,4 @@
+console.log('🔥 [BOOT] FILE STARTED');
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
@@ -29,7 +30,39 @@ const { startStyleLearningJob } = require('./jobs/styleLearningJob');
 
 
 const app = express();
-const PORT = process.env.PORT || 5050;
+const PORT = process.env.PORT || 10000;
+
+console.log('🚀 [BOOT] Attempting to bind port:', PORT);
+
+// Safe background startup
+const startServer = async () => {
+  try {
+    // Open port immediately
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log('✅ [LIVE] Server started on port:', PORT);
+      
+      // Initialize other services safely
+      initBackgroundServices().catch(err => {
+        console.error('⚠️ [INIT] Background service warning:', err.message);
+      });
+    });
+  } catch (err) {
+    console.error('❌ [CRITICAL] Failed to bind port:', err.message);
+    process.exit(1);
+  }
+};
+
+async function initBackgroundServices() {
+  const prisma = require('./config/database');
+  await prisma.$connect();
+  console.log('🐘 [DB] Connected');
+  
+  const { startEmailPolling } = require('./services/emailSyncService');
+  startEmailPolling(io);
+  startStyleLearningJob();
+}
+
+startServer();
 
 console.log('[Startup] Initializing EmailFlow AI Backend...');
 
@@ -277,41 +310,5 @@ io.on('connection', (socket) => {
 
 // Make io accessible to routes
 app.set('io', io);
-
-// 1. Immediately bind to the port so Render detects the service as alive
-const startApp = async () => {
-  try {
-    server.listen(PORT, () => {
-      console.log(`🚀 [Success] Server is LIVE and listening on port ${PORT}`);
-      
-      // 2. Initialize background services AFTER the port is bound
-      try {
-        startEmailPolling(io);
-        startStyleLearningJob();
-        console.log('✅ [Background] Services initialized.');
-      } catch (serviceError) {
-        console.error('⚠️ [Background] Service warning:', serviceError.message);
-      }
-    });
-  } catch (err) {
-    console.error('❌ [Fatal] Could not bind to port:', err.message);
-    process.exit(1);
-  }
-};
-
-startApp();
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  const statusCode = err.status || 500;
-  
-  console.error(`[Server Error] ${req.method} ${req.path}:`, err.stack || err);
-
-  res.status(statusCode).json({
-    error: err.message || 'Internal server error',
-    code: err.code || 'SERVER_ERROR',
-    ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {}),
-  });
-});
 
 module.exports = { app, io };

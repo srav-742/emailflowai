@@ -5,6 +5,8 @@ const {
   persistGmailTokens,
   getProfile,
   logout,
+  outlookAuth,
+  outlookCallback,
 } = require('../controllers/authController');
 const { getGmailAuthUrl, getGmailTokens, getGmailOAuthConfig } = require('../utils/gmailOAuth');
 const { authenticate } = require('../middleware/auth');
@@ -59,5 +61,9 @@ router.get('/google/callback', handleGmailCallback);
 router.post('/gmail/connect', authenticate, saveGmailTokens);
 router.get('/profile', authenticate, getProfile);
 router.post('/logout', authenticate, logout);
+
+// Outlook Integration
+router.get('/outlook', outlookAuth);
+router.get('/outlook/callback', outlookCallback);
 
 module.exports = router;

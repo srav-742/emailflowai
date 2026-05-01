@@ -42,9 +42,29 @@ model User {
   calendarEvents   CalendarEvent[]
   oauthTokens      OAuthToken[]
   clientErrorLogs  ClientErrorLog[]
+  styleProfile     StyleProfile?
   pushSubscriptions PushSubscription[]
 
   @@map("users")
+}
+
+model StyleProfile {
+  id               String   @id @default(uuid())
+  userId           String   @unique @map("user_id")
+  tone             String?  // casual, formal, friendly
+  formalityScore   Int      @default(5) @map("formality_score")
+  avgSentenceLength Int     @default(15) @map("avg_sentence_length")
+  commonOpeners    String[] @map("common_openers")
+  commonClosers    String[] @map("common_closers")
+  punctuationStyle String?  @map("punctuation_style")
+  vocabularyLevel  String?  @map("vocabulary_level")
+  rawProfile       Json?    @map("raw_profile")
+  lastLearnedAt    DateTime @default(now()) @map("last_learned_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("style_profiles")
 }
 
 model PushSubscription {
@@ -124,6 +144,10 @@ model Email {
   isStarred      Boolean   @default(false) @map("is_starred")
   aiConfidence   Float?    @map("ai_confidence")
   categorizedAt  DateTime? @map("categorized_at")
+  provider       String    @default("gmail")
+  priorityScore  Float     @default(0.5) @map("priority_score")
+  priorityReason String?   @map("priority_reason")
+  priorityScoredAt DateTime? @map("priority_scored_at")
   searchVector   Unsupported("tsvector")? @map("search_vector")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
@@ -134,15 +158,32 @@ model Email {
   aiLogs         AILog[]
   actionItems    ActionItem[]
   followUps      FollowUp[]
+  attachments    Attachment[]
 
   @@index([userId, receivedAt(sort: Desc)])
   @@index([userId, category])
   @@index([userId, receivedAt(sort: Desc), category])
+  @@index([userId, priorityScore(sort: Desc)])
   @@index([threadId])
   @@index([accountId])
   @@index([priority])
   @@unique([userId, messageId])
   @@map("emails")
+}
+
+model Attachment {
+  id          String   @id @default(uuid())
+  emailId     String   @map("email_id")
+  filename    String
+  contentType String   @map("content_type")
+  sizeBytes   Int?     @map("size_bytes")
+  storageKey  String   @map("storage_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  email       Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([emailId])
+  @@map("attachments")
 }
 
 model Thread {
@@ -169,7 +210,7 @@ model Thread {
 model EmailAccount {
   id           String   @id @default(uuid())
   userId       String   @map("user_id")
-  provider     String
+  provider     String   @default("gmail")
   email        String
   displayName  String?  @map("display_name")
   isPrimary    Boolean  @default(false) @map("is_primary")

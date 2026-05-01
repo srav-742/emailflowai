@@ -1,125 +1,167 @@
+const axios = require('axios');
 const prisma = require('../config/database');
-const { analyzeWritingStyle } = require('../utils/xai');
-const StyleExtractor = require('./StyleExtractor');
 
-const STYLE_MIN_SAMPLES = Number(process.env.STYLE_MIN_SAMPLES || 5);
-const STYLE_MAX_SAMPLES = Number(process.env.STYLE_MAX_SAMPLES || 20);
-
-async function getStyleTrainingEmails(userId) {
-  const sentEmails = await prisma.email.findMany({
-    where: {
-      userId,
-      OR: [{ isSentByUser: true }, { isSent: true }],
-      body: {
-        not: null,
-      },
-    },
-    orderBy: { receivedAt: 'desc' },
-    take: 20,
-    select: {
-      body: true,
-      subject: true,
-      isEditedReply: true,
-      isSentByUser: true,
-      receivedAt: true,
-    },
-  });
-
-  return sentEmails
-    .map((email) => ({
-      ...email,
-      body: String(email.body || '').trim(),
-      subject: String(email.subject || '').trim(),
-    }))
-    .filter((email) => email.body)
-    .slice(0, STYLE_MAX_SAMPLES);
-}
-
-function buildStyleSamples(emails = []) {
-  return emails.map((email) =>
-    [
-      `Subject: ${email.subject || 'Sent reply'}`,
-      `Edited AI draft: ${email.isEditedReply ? 'yes' : 'no'}`,
-      `Body: ${email.body}`,
-    ].join('\n'),
-  );
-}
-
-async function learnUserStyle(userId) {
-  let profile;
-
+/**
+ * Analyzes sent emails to build or update a user's writing style profile.
+ */
+async function buildStyleProfile(userId) {
   try {
-    profile = await StyleExtractor.extractProfile(userId);
-  } catch (error) {
-    console.error('[StyleService] Deep profile extraction failed, falling back to sent-email analysis:', error.message || error);
+    console.log(`[StyleService] Analyzing style for user ${userId}...`);
 
-    const sentEmails = await getStyleTrainingEmails(userId);
-    const samples = buildStyleSamples(sentEmails);
-    const fallbackProfile = await analyzeWritingStyle(samples);
-
-    profile = {
-      ...fallbackProfile,
-      ready: sentEmails.length >= STYLE_MIN_SAMPLES,
-      sampleCount: sentEmails.length,
-      minSamples: STYLE_MIN_SAMPLES,
-      lastExtraction: new Date().toISOString(),
-    };
-  }
-
-  if (!profile.ready) {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { style: true },
+    // 1. Fetch the last 50 sent emails
+    const sentEmails = await prisma.email.findMany({
+      where: { 
+        userId,
+        gmailLabelIds: { has: 'SENT' } 
+      },
+      orderBy: { receivedAt: 'desc' },
+      take: 50,
+      select: { subject: true, body: true, snippet: true }
     });
 
-    return {
-      ready: false,
-      style: user?.style || null,
-      message: 'Still learning your style. Keep sending and editing replies!',
-    };
-  }
+    if (sentEmails.length < 5) {
+      console.warn(`[StyleService] Not enough sent emails (${sentEmails.length}) to build a profile for user ${userId}.`);
+      return null;
+    }
 
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: { style: profile },
-  });
+    const emailTexts = sentEmails
+      .map(e => `Subject: ${e.subject}\nContent: ${e.body || e.snippet}`)
+      .join('\n\n---\n\n');
 
-  return {
-    ready: true,
-    style: user.style,
-    message: 'Style profile refined with deep analysis.',
-  };
-}
+    // 2. Analyze with AI (Groq)
+    const prompt = `
+      Analyze the following email samples and extract the author's writing style.
+      
+      Return a JSON object with:
+      - tone: (string) overall tone like "formal", "casual", "direct", or "friendly"
+      - formality_score: (number 1-10) 1 is very casual, 10 is strictly professional
+      - avg_sentence_length: (number) average words per sentence
+      - common_openers: (array of strings) common ways they start emails
+      - common_closers: (array of strings) common ways they end emails
+      - punctuation_style: (string) e.g., "minimal", "standard", "enthusiastic"
+      - vocabulary_level: (string) e.g., "simple", "professional", "academic"
+      - sign_off_name: (string) how they usually sign their name
 
-async function refreshStyleProfileIfReady(userId) {
-  const sentEmails = await getStyleTrainingEmails(userId);
-  if (sentEmails.length < STYLE_MIN_SAMPLES) {
+      SAMPLES:
+      ${emailTexts}
+    `;
+
+    const response = await axios.post(process.env.GROQ_API_URL, {
+      model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: 'You are a linguistic analyst. Return ONLY a valid JSON object.' },
+        { role: 'user', content: prompt }
+      ],
+      response_format: { type: 'json_object' }
+    }, {
+      headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` }
+    });
+
+    const profileData = JSON.parse(response.data.choices[0].message.content);
+
+    // 3. Save to database
+    const profile = await prisma.styleProfile.upsert({
+      where: { userId },
+      update: {
+        tone: profileData.tone,
+        formalityScore: profileData.formality_score,
+        avgSentenceLength: profileData.avg_sentence_length,
+        commonOpeners: profileData.common_openers,
+        commonClosers: profileData.common_closers,
+        punctuationStyle: profileData.punctuation_style,
+        vocabularyLevel: profileData.vocabulary_level,
+        rawProfile: profileData,
+        lastLearnedAt: new Date(),
+      },
+      create: {
+        userId,
+        tone: profileData.tone,
+        formalityScore: profileData.formality_score,
+        avgSentenceLength: profileData.avg_sentence_length,
+        commonOpeners: profileData.common_openers,
+        commonClosers: profileData.common_closers,
+        punctuationStyle: profileData.punctuation_style,
+        vocabularyLevel: profileData.vocabulary_level,
+        rawProfile: profileData,
+        lastLearnedAt: new Date(),
+      }
+    });
+
+    console.log(`[StyleService] Successfully updated style profile for user ${userId}. Tone: ${profile.tone}`);
+    return profile;
+  } catch (error) {
+    console.error(`[StyleService] Error building profile for user ${userId}:`, error.message);
     return null;
   }
-
-  return learnUserStyle(userId);
 }
 
-async function getOrCreateStyleProfile(userId) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      style: true,
-    },
-  });
+/**
+ * Returns the formatting instructions for the AI based on the user's style profile.
+ */
+async function getStyleInstructions(userId) {
+  const profile = await prisma.styleProfile.findUnique({ where: { userId } });
+  if (!profile) return 'Maintain a professional and clear tone.';
 
-  if (user?.style?.ready) {
-    return user.style;
+  return `
+    Draft the email in the user's personal style:
+    - Tone: ${profile.tone}
+    - Formality (1-10): ${profile.formalityScore}
+    - Common Openers: ${profile.commonOpeners.join(', ')}
+    - Common Closers: ${profile.commonClosers.join(', ')}
+    - Vocabulary Level: ${profile.vocabularyLevel}
+    - Punctuation Style: ${profile.punctuationStyle}
+  `;
+}
+
+/**
+ * Gets the user's style profile, or creates it if it doesn't exist.
+ */
+async function getOrCreateStyleProfile(userId) {
+  let profile = await prisma.styleProfile.findUnique({ where: { userId } });
+  if (!profile) {
+    profile = await buildStyleProfile(userId);
+  } else {
+    // Check if it needs a refresh
+    await refreshStyleProfileIfReady(userId, profile);
+  }
+  return profile;
+}
+
+/**
+ * Refreshes the style profile if it's in the learning period (daily) 
+ * or maintenance period (weekly).
+ */
+async function refreshStyleProfileIfReady(userId, profile) {
+  const now = new Date();
+  const lastLearnedAt = new Date(profile.lastLearnedAt);
+  const diffInDays = (now - lastLearnedAt) / (1000 * 60 * 60 * 24);
+
+  // Check user signup date to determine if in 10-day learning mode
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { createdAt: true } });
+  const signupDate = new Date(user.createdAt);
+  const daysSinceSignup = (now - signupDate) / (1000 * 60 * 60 * 24);
+
+  let shouldRefresh = false;
+
+  if (daysSinceSignup <= 10) {
+    // 10-day intensive mode: refresh daily
+    if (diffInDays >= 1) shouldRefresh = true;
+  } else {
+    // Maintenance mode: refresh weekly
+    if (diffInDays >= 7) shouldRefresh = true;
   }
 
-  const trainingResult = await learnUserStyle(userId);
-  return trainingResult.ready ? trainingResult.style : null;
+  if (shouldRefresh) {
+    console.log(`[StyleService] Refreshing profile for user ${userId} (${daysSinceSignup <= 10 ? 'Learning Mode' : 'Maintenance Mode'})`);
+    return await buildStyleProfile(userId);
+  }
+
+  return profile;
 }
 
-module.exports = {
-  learnUserStyle,
-  refreshStyleProfileIfReady,
-  getOrCreateStyleProfile,
-  getStyleTrainingEmails,
-  STYLE_MIN_SAMPLES,
+module.exports = { 
+  buildStyleProfile, 
+  getStyleInstructions, 
+  getOrCreateStyleProfile, 
+  refreshStyleProfileIfReady 
 };

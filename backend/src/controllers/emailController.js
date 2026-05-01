@@ -12,6 +12,7 @@ const { emitEmailNotifications } = require('../services/notificationService');
 const { detectFollowUps } = require('../services/followUpService');
 const { getAuthenticatedGmailClient } = require('../services/tokenService');
 const { getUserSocketRoom } = require('../utils/socketRooms');
+const { getDownloadUrl } = require('../services/attachmentService');
 const StyleExtractor = require('../services/StyleExtractor');
 
 function parseCsvList(value) {
@@ -212,19 +213,36 @@ const getThreads = async (req, res) => {
       skip: (Number(page) - 1) * Number(limit),
       take: Number(limit),
       include: {
+        emails: {
+          orderBy: { receivedAt: 'desc' },
+          take: 1,
+          select: { subject: true, sender: true, senderName: true }
+        },
         _count: {
           select: { emails: true }
         }
       }
     });
 
+    // For participants, we'll fetch a bit more for each thread in a second pass if needed, 
+    // but for the list view, we can derive them from the recent emails.
+    const enrichedThreads = threads.map(t => {
+      const latestEmail = t.emails[0] || {};
+      return {
+        ...t,
+        subject: latestEmail.subject || 'No Subject',
+        lastSender: latestEmail.senderName || latestEmail.sender,
+        emailCount: t._count?.emails || 0,
+        // Remove the emails array from the response to keep it clean
+        emails: undefined,
+        _count: undefined
+      };
+    });
+
     const total = await prisma.thread.count({ where });
 
     res.json({
-      threads: threads.map(t => ({
-        ...t,
-        emailCount: t._count?.emails || 0
-      })),
+      threads: enrichedThreads,
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -275,6 +293,11 @@ const getEmailById = async (req, res) => {
         id: req.params.id,
         userId: req.user.id,
       },
+      include: {
+        attachments: {
+          select: { id: true, filename: true, contentType: true, sizeBytes: true }
+        }
+      }
     });
 
     if (!email) return res.status(404).json({ error: 'Email not found' });
@@ -361,6 +384,7 @@ const searchEmails = async (req, res) => {
     const offset = (Number(page) - 1) * Number(limit);
     const emails = await prisma.$queryRaw`
       SELECT *,
+        ts_headline('english', COALESCE(subject, '') || ' ' || COALESCE(snippet, ''), plainto_tsquery('english', ${q}), 'StartSel=<b>, StopSel=</b>') AS highlight,
         ts_rank(search_vector, plainto_tsquery('english', ${q})) AS rank
       FROM emails
       WHERE "userId" = ${req.user.id}
@@ -538,6 +562,10 @@ const aiSummarize = async (req, res) => {
 
     if (!email) return res.status(404).json({ error: 'Email not found' });
 
+    if (email.summary) {
+      return res.json({ message: 'Retrieved cached summary', summary: email.summary });
+    }
+
     const summary = await xaiSummarize(buildEmailContent(email), email.subject || '');
     const updatedEmail = await prisma.email.update({
       where: { id: email.id },
@@ -557,7 +585,7 @@ const aiSummarize = async (req, res) => {
 
     await logAIUsage(req.user.id, { aiActions: 1, timeSaved: 2 });
 
-    res.json({ message: 'Email summarized using AI', email: updatedEmail });
+    res.json({ message: 'Email summarized using AI', summary, email: updatedEmail });
   } catch (error) {
     console.error('AI summarize error:', error);
     res.status(500).json({ error: 'Failed to summarize email with AI' });
@@ -817,6 +845,80 @@ const aiProcessAll = async (req, res) => {
   }
 };
 
+const getAttachmentDownloadUrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const attachment = await prisma.attachment.findFirst({
+      where: { 
+        id, 
+        email: { userId: req.user.id } 
+      }
+    });
+
+    if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+    const downloadUrl = await getDownloadUrl(attachment.storageKey);
+    res.json({ downloadUrl });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate download URL' });
+  }
+};
+
+const summarizeThread = async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const userId = req.user.id;
+
+    const thread = await prisma.thread.findUnique({
+      where: { id: threadId },
+      include: {
+        emails: {
+          orderBy: { receivedAt: 'asc' },
+          take: 20
+        }
+      }
+    });
+
+    if (!thread) return res.status(404).json({ error: 'Thread not found' });
+    if (thread.userId !== userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Return cached summary if available
+    if (thread.summary) {
+      return res.json({ message: 'Retrieved cached thread summary', summary: thread.summary });
+    }
+
+    const conversation = thread.emails.map((e, i) => 
+      `[${i + 1}] From: ${e.senderName || e.sender}\n${e.body || e.snippet}`
+    ).join('\n\n---\n\n');
+
+    const prompt = `Summarize this email thread accurately.
+    Identify:
+    - Key decisions made
+    - Pending action items
+    - Current status and next steps
+    
+    CONVERSATION:
+    ${conversation}`;
+
+    const { summarizeBatchEmails } = require('../utils/xai');
+    const summary = await summarizeBatchEmails(thread.emails, userId); // Or custom prompt logic
+
+    const updatedThread = await prisma.thread.update({
+      where: { id: threadId },
+      data: { summary }
+    });
+
+    res.json({ 
+      message: 'Thread summarized using AI', 
+      summary,
+      lastUpdated: updatedThread.updatedAt
+    });
+  } catch (error) {
+    console.error('Thread summarize error:', error);
+    res.status(500).json({ error: 'Failed to summarize thread' });
+  }
+};
+
 module.exports = {
   fetchEmails,
   getEmails,
@@ -836,4 +938,6 @@ module.exports = {
   searchEmails,
   getCategoryCounts,
   updateEmailCategory,
+  getAttachmentDownloadUrl,
+  summarizeThread,
 };

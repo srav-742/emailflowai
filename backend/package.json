@@ -14,6 +14,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1040.0",
+    "@aws-sdk/s3-request-presigner": "^3.1040.0",
+    "@azure/msal-node": "^5.1.5",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.6.0",
     "@upstash/ratelimit": "^2.0.8",
@@ -30,6 +34,7 @@
     "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
     "ioredis": "^5.10.1",
+    "isomorphic-fetch": "^3.0.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
     "rate-limit-redis": "^4.3.1",
@@ -38,7 +43,9 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "jest": "^30.3.0",
     "nodemon": "^3.1.9",
-    "prisma": "^7.6.0"
+    "prisma": "^7.6.0",
+    "supertest": "^7.2.2"
   }
 }

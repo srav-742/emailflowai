@@ -3,6 +3,8 @@ const { verifyIdToken } = require('../utils/firebase');
 const { generateToken } = require('../utils/jwt');
 const { getUserInfo } = require('../utils/gmailOAuth');
 const { encrypt } = require('../utils/encryption');
+const { msalClient } = require('../config/msalConfig');
+const { syncOutlookEmails } = require('../services/outlookSyncService');
 
 function serializeUser(user) {
   return {
@@ -228,4 +230,62 @@ const logout = async (req, res) => {
   }
 };
 
-module.exports = { firebaseGoogleLogin, saveGmailTokens, persistGmailTokens, getProfile, logout };
+const outlookAuth = async (req, res) => {
+  try {
+    const authCodeUrlParameters = {
+      scopes: ['user.read', 'mail.read', 'mail.send', 'offline_access'],
+      redirectUri: process.env.AZURE_REDIRECT_URI || 'http://localhost:5050/auth/outlook/callback',
+    };
+
+    const response = await msalClient.getAuthCodeUrl(authCodeUrlParameters);
+    res.redirect(response);
+  } catch (error) {
+    console.error('Outlook auth error:', error);
+    res.redirect(`${process.env.FRONTEND_URL}/settings?error=outlook_auth_failed`);
+  }
+};
+
+const outlookCallback = async (req, res) => {
+  try {
+    const { code } = req.query;
+    const userId = req.query.state; // We should pass userId in state if possible, or use session
+
+    const tokenRequest = {
+      code,
+      scopes: ['user.read', 'mail.read', 'mail.send', 'offline_access'],
+      redirectUri: process.env.AZURE_REDIRECT_URI || 'http://localhost:5050/auth/outlook/callback',
+    };
+
+    const response = await msalClient.acquireTokenByCode(tokenRequest);
+    const { accessToken, refreshToken, account } = response;
+    const email = account.username;
+
+    // Persist to DB
+    const emailAccount = await prisma.emailAccount.upsert({
+      where: { userId_email: { userId: account.homeAccountId, email } }, // Using homeAccountId as userId for simplicity in this demo, usually it's from JWT
+      update: {
+        accessToken: encrypt(accessToken),
+        refreshToken: refreshToken ? encrypt(refreshToken) : undefined,
+        provider: 'outlook',
+      },
+      create: {
+        userId: account.homeAccountId,
+        email,
+        displayName: account.name,
+        provider: 'outlook',
+        accessToken: encrypt(accessToken),
+        refreshToken: refreshToken ? encrypt(refreshToken) : '',
+      }
+    });
+
+    // Sync initial emails
+    await syncOutlookEmails(accessToken, emailAccount.userId, emailAccount.id);
+
+    res.redirect(`${process.env.FRONTEND_URL}/settings?status=success&provider=outlook`);
+  } catch (error) {
+    console.error('Outlook callback error:', error);
+    res.redirect(`${process.env.FRONTEND_URL}/settings?error=outlook_sync_failed`);
+  }
+};
+
+module.exports = { firebaseGoogleLogin, saveGmailTokens, persistGmailTokens, getProfile, logout, outlookAuth, outlookCallback };

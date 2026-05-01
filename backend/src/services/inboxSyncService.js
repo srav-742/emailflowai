@@ -8,6 +8,8 @@ const { extractBatchActionItems } = require('./actionItemService');
 const { trackEmailProcessing, trackAIAction } = require('./analyticsService');
 const { detectAndCreateFollowUp, resolveFollowUpIfReplied } = require('./followUpService');
 const { categorizeEmailsBatch } = require('../lib/ai/categorizeEmail');
+const { saveAttachment } = require('./attachmentService');
+const { scoreEmailPriority } = require('./priorityService');
 
 const activeSyncs = new Map();
 
@@ -55,6 +57,16 @@ function parseName(sender = '') {
   if (!sender) return '';
   const match = sender.match(/^(.*?)(<.+>)$/);
   return match ? match[1].replace(/["']/g, '').trim() : sender;
+}
+
+function findAttachments(payload, attachments = []) {
+  if (payload.body?.attachmentId) {
+    attachments.push(payload);
+  }
+  if (payload.parts) {
+    payload.parts.forEach(part => findAttachments(part, attachments));
+  }
+  return attachments;
 }
 
 function ensureGmailConnection(user) {
@@ -184,6 +196,7 @@ function buildEmailPayload(message) {
     receivedAt: message.data.internalDate ? new Date(Number.parseInt(message.data.internalDate, 10)) : new Date(),
     isRead: !labelIds.includes('UNREAD'),
     accountId: message.accountId, // Ensure accountId is passed through
+    attachmentParts: findAttachments(payload)
   };
 }
 
@@ -220,7 +233,10 @@ async function persistEmail(userId, payload, existingEmail) {
   if (payload.threadId) {
     await prisma.thread.upsert({
       where: { id: payload.threadId },
-      update: { lastReceivedAt: payload.receivedAt },
+      update: { 
+        lastReceivedAt: payload.receivedAt,
+        summary: null // Invalidate cached summary when new email arrives
+      },
       create: {
         id: payload.threadId,
         userId,
@@ -444,6 +460,20 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
           newEmails.push(result.email);
           const { trackEvent } = require('./analyticsService');
           trackEvent(userId, 'email_processed', { emailId: result.email.id });
+
+          // Process attachments for new emails
+          if (payload.attachmentParts?.length > 0) {
+            payload.attachmentParts.forEach(part => {
+              saveAttachment(gmail, payload.messageId, part).catch(err => {
+                console.error('[Sync] Attachment save failed:', err.message);
+              });
+            });
+          }
+
+          // Score priority for new emails
+          scoreEmailPriority(result.email.id).catch(err => {
+            console.error('[Sync] Priority scoring failed:', err.message);
+          });
         }
       } catch (error) {
         skippedMessages += 1;

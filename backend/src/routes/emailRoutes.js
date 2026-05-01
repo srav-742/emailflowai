@@ -18,6 +18,8 @@ const {
   searchEmails,
   getCategoryCounts,
   updateEmailCategory,
+  getAttachmentDownloadUrl,
+  summarizeThread,
 } = require('../controllers/emailController');
 const { authenticate } = require('../middleware/auth');
 const planGating = require('../middleware/planGating');
@@ -33,6 +35,7 @@ router.get('/search', searchEmails);
 router.get('/', getEmails);
 router.get('/threads', getThreads);
 router.get('/threads/:threadId', getThreadById);
+router.post('/threads/:threadId/summarize', summarizeThread);
 router.get('/stats', getStats);
 router.get('/counts', getCategoryCounts);
 router.post('/classify', classifyEmails);
@@ -41,6 +44,7 @@ router.patch('/:id/category', updateEmailCategory);
 router.post('/:id/summarize', summarizeEmail);
 router.post('/:id/extract-tasks', extractEmailTasks);
 router.post('/:id/reply/send', sendReply);
+router.get('/attachments/:id/download', getAttachmentDownloadUrl);
 
 // AI-Powered Routes (Groq) - Gated by Plan
 router.post('/ai/process-all', planGating(['pro']), aiProcessAll);

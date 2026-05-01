@@ -25,6 +25,7 @@ const { getUserSocketRoom } = require('./utils/socketRooms');
 const { startEmailPolling } = require('./services/emailSyncService');
 const { generalLimiter, aiLimiter } = require('./middleware/rateLimiter');
 const redis = require('./redisClient');
+const { startStyleLearningJob } = require('./jobs/styleLearningJob');
 
 
 const app = express();
@@ -288,6 +289,8 @@ app.use((err, req, res, next) => {
 // Start server
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  startEmailPolling(io);
+  startStyleLearningJob();
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🤖 Groq AI: ${process.env.GROQ_API_KEY ? '✅ Key loaded (' + process.env.GROQ_MODEL + ')' : '❌ GROQ_API_KEY not set!'}`);
 });

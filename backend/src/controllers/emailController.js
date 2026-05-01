@@ -1,5 +1,6 @@
 const prisma = require('../config/database');
 const redis = require('../redisClient');
+const cache = require('../lib/cache/redis');
 const { analyzeEmailIntelligence, generateSummary } = require('../utils/classifier');
 const { summarizeBatchEmails, generateReply, XAI_MODEL } = require('../utils/xai');
 const { extractTasksWithAI } = require('../services/taskExtractor');
@@ -76,7 +77,7 @@ const fetchEmails = async (req, res) => {
 
 const getEmails = async (req, res) => {
   try {
-    const { category, categoryIn, priority, followUp, isRead, actionRequired, labels, limit = 20, q, cursor } = req.query;
+    const { category, categoryIn, priority, followUp, isRead, actionRequired, labels, limit = 20, q, cursor, accountId } = req.query;
     const userId = req.user.id;
 
     if (category === 'waiting') {
@@ -104,6 +105,7 @@ const getEmails = async (req, res) => {
     const labelList = parseCsvList(labels);
     const where = {
       userId,
+      ...(accountId ? { accountId: String(accountId) } : {}),
       ...(category ? { category: String(category) } : {}),
       ...(category === 'focus_today' ? { receivedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } : {}),
       ...(categories.length ? { category: { in: categories } } : {}),
@@ -147,21 +149,22 @@ const getEmails = async (req, res) => {
 const getCategoryCounts = async (req, res) => {
   try {
     const userId = req.user.id;
-    const cacheKey = `counts:${userId}`;
+    const { accountId } = req.query;
+    const cacheKey = `inbox:counts:${userId}${accountId ? ':' + accountId : ''}`;
     
-    const cached = await redis.get(cacheKey);
-    if (cached) return res.json(JSON.parse(cached));
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const [focusToday, readLater, newsletter, waiting] = await Promise.all([
-      prisma.email.count({ where: { userId, category: 'focus_today', isRead: false, receivedAt: { gte: twentyFourHoursAgo } } }),
-      prisma.email.count({ where: { userId, category: 'read_later', isRead: false } }),
-      prisma.email.count({ where: { userId, category: 'newsletter', isRead: false } }),
-      prisma.followUp.count({ where: { userId, status: 'waiting' } }),
+      prisma.email.count({ where: { userId, accountId: accountId || undefined, category: 'focus_today', isRead: false, receivedAt: { gte: twentyFourHoursAgo } } }),
+      prisma.email.count({ where: { userId, accountId: accountId || undefined, category: 'read_later', isRead: false } }),
+      prisma.email.count({ where: { userId, accountId: accountId || undefined, category: 'newsletter', isRead: false } }),
+      prisma.followUp.count({ where: { userId, accountId: accountId || undefined, status: 'waiting' } }),
     ]);
 
     const counts = { focus_today: focusToday, read_later: readLater, newsletter: newsletter, waiting };
-    await redis.setex(cacheKey, 300, JSON.stringify(counts));
+    await cache.set(cacheKey, counts, 300); // 5 min TTL
     
     res.json(counts);
   } catch (error) {
@@ -181,7 +184,10 @@ const updateEmailCategory = async (req, res) => {
     });
 
     // Invalidate counts cache
-    await redis.del(`counts:${userId}`);
+    await cache.del(`inbox:counts:${userId}`);
+    if (email.accountId) {
+      await cache.del(`inbox:counts:${userId}:${email.accountId}`);
+    }
 
     res.json({ message: 'Category updated', email });
   } catch (error) {
@@ -191,10 +197,11 @@ const updateEmailCategory = async (req, res) => {
 
 const getThreads = async (req, res) => {
   try {
-    const { page = 1, limit = 20, priority, category } = req.query;
+    const { page = 1, limit = 20, priority, category, accountId } = req.query;
     
     const where = {
       userId: req.user.id,
+      ...(accountId ? { accountId: String(accountId) } : {}),
       ...(priority ? { priority: String(priority) } : {}),
       ...(category ? { category: String(category) } : {}),
     };
@@ -387,7 +394,7 @@ const searchEmails = async (req, res) => {
 
 const getStats = async (req, res) => {
   try {
-    const [totalEmails, byCategory, byPriority, unreadCount, actionRequired, followUpCount, taskPayload] = await Promise.all([
+    const [totalEmails, byCategory, byPriority, unreadCount, actionRequired, followUpCount, taskPayload, calendarCount] = await Promise.all([
       prisma.email.count({ where: { userId: req.user.id } }),
       prisma.email.groupBy({
         by: ['category'],
@@ -406,6 +413,7 @@ const getStats = async (req, res) => {
         where: { userId: req.user.id },
         select: { tasks: true },
       }),
+      prisma.calendarEvent.count({ where: { userId: req.user.id } }),
     ]);
 
     const allTasks = taskPayload.flatMap((entry) => (Array.isArray(entry.tasks) ? entry.tasks : []));
@@ -422,6 +430,7 @@ const getStats = async (req, res) => {
         byCategory: byCategory.map((item) => ({ category: item.category, count: item._count?._all ?? item._count ?? 0 })),
         byPriority: byPriority.map((item) => ({ priority: item.priority, count: item._count?._all ?? item._count ?? 0 })),
       },
+      calendarCount,
     });
   } catch (error) {
     console.error('Get stats error:', error);
@@ -431,7 +440,8 @@ const getStats = async (req, res) => {
 
 const syncEmails = async (req, res) => {
   try {
-    const result = await syncInbox(req.user.id, 100, { returnMeta: true });
+    const { accountId } = req.body;
+    const result = await syncInbox(req.user.id, 100, { returnMeta: true, accountId });
     const io = req.app.get('io');
 
     if (result.newEmails.length > 0) {

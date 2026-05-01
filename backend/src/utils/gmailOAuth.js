@@ -61,4 +61,12 @@ function getGmailClient(accessToken, refreshToken) {
   return google.gmail({ version: 'v1', auth: oauth2Client });
 }
 
-module.exports = { getGmailAuthUrl, getGmailTokens, getGmailClient, getConfiguredRedirectUri, getConfiguredFrontendUrl, getGmailOAuthConfig };
+async function getUserInfo(tokens) {
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials(tokens);
+  const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+  const response = await oauth2.userinfo.get();
+  return response.data;
+}
+
+module.exports = { getGmailAuthUrl, getGmailTokens, getGmailClient, getUserInfo, getConfiguredRedirectUri, getConfiguredFrontendUrl, getGmailOAuthConfig };

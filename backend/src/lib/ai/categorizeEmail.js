@@ -1,4 +1,5 @@
 const { requestGroq, extractJsonBlock } = require('../../utils/xai');
+const cache = require('../cache/redis');
 
 /**
  * Categorizes an email into one of the four smart tabs.
@@ -68,7 +69,26 @@ async function categorizeEmail(emailData) {
 async function categorizeEmailsBatch(emailsData) {
   if (!emailsData.length) return [];
 
-  const emailList = emailsData.map((e, i) => 
+  const results = new Array(emailsData.length).fill(null);
+  const uncachedIndices = [];
+
+  // 1. Check cache first
+  for (let i = 0; i < emailsData.length; i++) {
+    const messageId = emailsData[i].id;
+    if (messageId) {
+      const cached = await cache.get(`ai:category:${messageId}`);
+      if (cached) {
+        results[i] = cached;
+        continue;
+      }
+    }
+    uncachedIndices.push(i);
+  }
+
+  if (uncachedIndices.length === 0) return results;
+
+  const batchToCategorize = uncachedIndices.map(i => emailsData[i]);
+  const emailList = batchToCategorize.map((e, i) => 
     `ID: ${i}\nFrom: ${e.from}\nSubject: ${e.subject}\nSnippet: ${e.snippet}`
   ).join('\n---\n');
 
@@ -94,24 +114,33 @@ async function categorizeEmailsBatch(emailsData) {
 
     const json = extractJsonBlock(response, 'array');
     if (json) {
-      const results = JSON.parse(json);
-      return emailsData.map((data, i) => {
-        const result = results[i] || { category: 'other', confidence: 0 };
+      const apiResults = JSON.parse(json);
+      
+      for (let j = 0; j < uncachedIndices.length; j++) {
+        const originalIndex = uncachedIndices[j];
+        const data = emailsData[originalIndex];
+        let result = apiResults[j] || { category: 'other', confidence: 0 };
         
         // Rule-based override for newsletter
         const text = (data.subject + ' ' + (data.snippet || '')).toLowerCase();
         if (text.includes('unsubscribe') || text.includes('view in browser')) {
-          return { ...result, category: 'newsletter', confidence: 1.0 };
+          result = { ...result, category: 'newsletter', confidence: 1.0 };
         }
 
-        return result;
-      });
+        results[originalIndex] = result;
+
+        // 2. Store in cache (7 days TTL)
+        if (data.id) {
+          await cache.set(`ai:category:${data.id}`, result, 7 * 24 * 60 * 60);
+        }
+      }
     }
   } catch (error) {
     console.error('[AI Categorizer] Batch Error:', error);
   }
 
-  return emailsData.map(() => ({ category: 'other', confidence: 0 }));
+  // Fallback for any remaining nulls
+  return results.map(r => r || { category: 'other', confidence: 0 });
 }
 
 module.exports = { categorizeEmail, categorizeEmailsBatch };

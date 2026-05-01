@@ -20,6 +20,7 @@ async function detectAndCreateFollowUp(email, userId) {
       const followUp = await prisma.followUp.create({
         data: {
           userId,
+          accountId: email.accountId,
           sentEmailId: email.id,
           threadId: email.threadId,
           recipientEmail: email.recipients[0] || 'unknown',

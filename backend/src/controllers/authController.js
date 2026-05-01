@@ -1,6 +1,8 @@
 const prisma = require('../config/database');
 const { verifyIdToken } = require('../utils/firebase');
 const { generateToken } = require('../utils/jwt');
+const { getUserInfo } = require('../utils/gmailOAuth');
+const { encrypt } = require('../utils/encryption');
 
 function serializeUser(user) {
   return {
@@ -28,7 +30,12 @@ async function persistGmailTokens(userId, tokens) {
     throw new Error('User not found while saving Gmail tokens.');
   }
 
-  return prisma.user.update({
+  // Get email for this token set
+  const userInfo = await getUserInfo(tokens);
+  const accountEmail = userInfo.email;
+
+  // 1. Update the main user record (for legacy compatibility and primary identity)
+  const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: {
       accessToken: tokens.access_token ?? existingUser.accessToken,
@@ -37,6 +44,59 @@ async function persistGmailTokens(userId, tokens) {
       gmailConnectedAt: new Date(),
     },
   });
+
+  // 2. Create or update the EmailAccount record
+  await prisma.emailAccount.upsert({
+    where: {
+      provider_email: {
+        provider: 'google',
+        email: accountEmail,
+      },
+    },
+    update: {
+      userId,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+      displayName: userInfo.name || accountEmail.split('@')[0],
+    },
+    create: {
+      userId,
+      provider: 'google',
+      email: accountEmail,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+      displayName: userInfo.name || accountEmail.split('@')[0],
+      isPrimary: accountEmail === updatedUser.email,
+    },
+  });
+
+  // 3. Create or update the encrypted OAuthToken record
+  await prisma.oAuthToken.upsert({
+    where: {
+      userId_email: {
+        userId,
+        email: accountEmail,
+      },
+    },
+    update: {
+      accessToken: encrypt(tokens.access_token),
+      refreshToken: encrypt(tokens.refresh_token),
+      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+      updatedAt: new Date(),
+    },
+    create: {
+      userId,
+      email: accountEmail,
+      accessToken: encrypt(tokens.access_token),
+      refreshToken: encrypt(tokens.refresh_token),
+      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600 * 1000),
+      scope: tokens.scope || 'https://www.googleapis.com/auth/gmail.readonly',
+    },
+  });
+
+  return updatedUser;
 }
 
 const firebaseGoogleLogin = async (req, res) => {

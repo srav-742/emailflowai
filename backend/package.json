@@ -16,6 +16,8 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.6.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.37.0",
     "axios": "^1.14.0",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
@@ -30,6 +32,7 @@
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
+    "rate-limit-redis": "^4.3.1",
     "socket.io": "^4.8.3",
     "stripe": "^22.1.0"
   },

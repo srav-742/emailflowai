@@ -26,6 +26,7 @@ async function pollInbox(io) {
       },
       select: {
         id: true,
+        email: true,
         importantContacts: true,
       },
     });
@@ -54,6 +55,15 @@ async function pollInbox(io) {
         // Sync all new-style accounts
         for (const account of accounts) {
           await syncAndNotify(io, user, account.id);
+        }
+
+        // Automatic Calendar Sync
+        const { syncCalendar } = require('./calendarService');
+        try {
+          await syncCalendar(user.id);
+        } catch (calErr) {
+          // Silently fail or log if needed, don't crash the email sync
+          console.log(`[Sync] Calendar auto-sync skipped for ${user.email}: ${calErr.message}`);
         }
 
       } catch (error) {

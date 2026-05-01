@@ -36,6 +36,7 @@ async function extractAndSaveActionItems(emailId, userId) {
         return prisma.actionItem.create({
           data: {
             userId,
+            accountId: email.accountId,
             emailId: email.id,
             threadId: email.threadId,
             title: task.task,

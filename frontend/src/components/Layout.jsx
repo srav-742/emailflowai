@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AccountSwitcher from './AccountSwitcher';
 
 const shellNavItems = [
   { path: '/dashboard', label: 'Dashboard', kicker: 'Overview' },
@@ -15,6 +16,7 @@ const shellNavItems = [
   { path: '/newsletters', label: 'Newsletters', kicker: 'Favorite publications' },
   { path: '/waiting', label: 'Waiting for Reply', kicker: 'Expectations' },
   { path: '/settings/digest', label: 'Digest Settings', kicker: 'Personalization' },
+  { path: '/settings/accounts', label: 'Gmail Accounts', kicker: 'Multi-account setup' },
 ];
 
 const pageTitles = {
@@ -30,6 +32,7 @@ const pageTitles = {
   '/newsletters': 'Newsletters',
   '/waiting': 'Waiting for Reply',
   '/settings/digest': 'Morning Brief Settings',
+  '/settings/accounts': 'Account Operations',
 };
 
 const pageDescriptions = {
@@ -45,6 +48,7 @@ const pageDescriptions = {
   '/newsletters': 'Cleaned and separated newsletter feeds to reduce inbox noise.',
   '/waiting': 'Threads where you sent a message and are still waiting for a response.',
   '/settings/digest': 'Customize your daily AI-powered intelligence summary.',
+  '/settings/accounts': 'Manage multiple Gmail connections, sync settings, and UI identities.',
 };
 
 const Layout = () => {
@@ -76,6 +80,10 @@ const Layout = () => {
         </div>
 
         <nav className="sidebar-nav">
+          <AccountSwitcher sidebarOpen={sidebarOpen} />
+          
+          <div style={{ height: '1.5rem' }}></div>
+
           {shellNavItems.map((item) => {
             const active = location.pathname === item.path;
 

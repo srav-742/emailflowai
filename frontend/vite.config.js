@@ -21,11 +21,6 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
-      '/auth': {
-        target: apiTarget,
-        changeOrigin: true,
-        secure: false,
-      },
       '/socket.io': {
         target: apiTarget,
         changeOrigin: true,

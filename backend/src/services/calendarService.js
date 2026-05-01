@@ -1,19 +1,20 @@
 const { google } = require('googleapis');
 const prisma = require('../config/database');
+const tokenService = require('./tokenService');
 
 /**
  * Sync Google Calendar events for the next 7 days.
  */
 async function syncCalendar(userId) {
   try {
+    const accessToken = await tokenService.getValidAccessToken(userId);
+    
+    // We need the refresh token to set in the client if we want to listen for refreshes,
+    // though getValidAccessToken already handles persistence.
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { accessToken: true, refreshToken: true }
+      select: { refreshToken: true }
     });
-
-    if (!user || !user.refreshToken) {
-      throw new Error('User not connected to Google.');
-    }
 
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
@@ -22,8 +23,8 @@ async function syncCalendar(userId) {
     );
 
     oauth2Client.setCredentials({
-      access_token: user.accessToken,
-      refresh_token: user.refreshToken
+      access_token: accessToken,
+      refresh_token: user?.refreshToken
     });
 
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
@@ -31,6 +32,7 @@ async function syncCalendar(userId) {
     const timeMin = new Date().toISOString();
     const timeMax = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
+    console.log(`[CalendarService] Fetching events for user ${userId}...`);
     const response = await calendar.events.list({
       calendarId: 'primary',
       timeMin,
@@ -40,6 +42,7 @@ async function syncCalendar(userId) {
     });
 
     const events = response.data.items || [];
+    console.log(`[CalendarService] Found ${events.length} events for user ${userId}`);
     const syncedEvents = [];
 
     for (const event of events) {
@@ -77,6 +80,9 @@ async function syncCalendar(userId) {
     return syncedEvents;
   } catch (error) {
     console.error('[CalendarService] Sync failed:', error.message);
+    if (error.response) {
+      console.error('[CalendarService] Google API Error:', error.response.data);
+    }
     throw error;
   }
 }
@@ -86,13 +92,14 @@ async function syncCalendar(userId) {
  */
 async function addReminder(userId, actionItemId) {
   try {
-    const [user, actionItem] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { accessToken: true, refreshToken: true }
-      }),
+    const [accessToken, actionItem, user] = await Promise.all([
+      tokenService.getValidAccessToken(userId),
       prisma.actionItem.findUnique({
         where: { id: actionItemId }
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { refreshToken: true }
       })
     ]);
 
@@ -105,8 +112,8 @@ async function addReminder(userId, actionItemId) {
     );
 
     oauth2Client.setCredentials({
-      access_token: user.accessToken,
-      refresh_token: user.refreshToken
+      access_token: accessToken,
+      refresh_token: user?.refreshToken
     });
 
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });

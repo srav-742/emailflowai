@@ -34,7 +34,7 @@ const Dashboard = () => {
   const [notice, setNotice] = useState(null);
   const [inboxSummary, setInboxSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
-  const [stats, setStats] = useState({ totalEmails: 0, unreadCount: 0, actionRequired: 0, followUpCount: 0 });
+  const [stats, setStats] = useState({ totalEmails: 0, unreadCount: 0, actionRequired: 0, followUpCount: 0, calendarCount: 0 });
 
   const currentStep = useMemo(() => {
     if (!user?.hasGmailAccess) return 1;
@@ -60,7 +60,12 @@ const Dashboard = () => {
     try {
       const response = await emailAPI.getStats();
       const data = response.data || {};
-      if (data.stats) setStats(data.stats);
+      if (data.stats) {
+        setStats({
+          ...data.stats,
+          calendarCount: data.calendarCount || 0
+        });
+      }
       return data.stats;
     } catch (error) {
       console.error('Failed to fetch stats:', error);
@@ -217,11 +222,11 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="bento-col-4">
-          <div className="surface-card" style={{ padding: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <div className="brand-mark" style={{ background: 'var(--success)' }}>✓</div>
+          <div className="surface-card" style={{ padding: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center', cursor: 'pointer' }} onClick={() => navigate('/meetings')}>
+            <div className="brand-mark" style={{ background: 'var(--success)' }}>📅</div>
             <div>
-              <span className="eyebrow" style={{ color: 'var(--success)' }}>Processed</span>
-              <h2 style={{ fontSize: '1.8rem', margin: 0 }}>{Math.max(0, stats.totalEmails - stats.unreadCount)}</h2>
+              <span className="eyebrow" style={{ color: 'var(--success)' }}>Meetings</span>
+              <h2 style={{ fontSize: '1.8rem', margin: 0 }}>{stats.calendarCount || 0}</h2>
             </div>
           </div>
         </div>

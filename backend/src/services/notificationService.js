@@ -1,6 +1,7 @@
 const { matchesImportantContact } = require('../utils/contactUtils');
 const { getUserSocketRoom } = require('../utils/socketRooms');
 const notificationEmitter = require('../utils/eventEmitter');
+const { pushEvent } = require('../routes/sse');
 
 function getImportantEmails(newEmails = [], user = {}) {
   const importantContacts = Array.isArray(user.importantContacts) ? user.importantContacts : [];
@@ -22,6 +23,8 @@ function emitEmailNotifications(io, user, newEmails = []) {
 
   if (newEmails.length > 0) {
     io.to(room).emit('new-emails', newEmails);
+    // Push via SSE
+    pushEvent(user.id, 'new_email', newEmails);
   }
 
   const importantEmails = getImportantEmails(newEmails, user);
@@ -36,6 +39,7 @@ function emitFollowUpNotifications(io, userId, followUps = []) {
   }
 
   io.to(getUserSocketRoom(userId)).emit('follow-up-ready', followUps);
+  pushEvent(userId, 'follow_up', followUps);
 }
 
 module.exports = {

@@ -91,4 +91,10 @@ export const calendarAPI = {
   addReminder: (actionItemId) => api.post('/calendar/add-reminder', { actionItemId }),
 };
 
+export const accountAPI = {
+  list: () => api.get('/accounts'),
+  update: (id, data) => api.patch(`/accounts/${id}`, data),
+  disconnect: (id) => api.delete(`/accounts/${id}`),
+};
+
 export default api;

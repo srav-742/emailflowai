@@ -143,6 +143,18 @@ const GmailConnect = () => {
           <p>We use a separate Gmail OAuth step so long-lived inbox access is stored safely on the backend and never in the browser.</p>
         </div>
 
+        <div className="inline-alert warning-alert" style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem' }}>
+          <strong style={{ color: '#f59e0b', display: 'block', marginBottom: '0.25rem' }}>⚠️ Calendar Access Required</strong>
+          <p style={{ margin: 0, fontSize: '0.9rem', color: '#d97706' }}>
+            When the Google screen appears, you <strong>MUST</strong> check the boxes for:
+            <ul style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+              <li>View and edit Google Calendar events</li>
+              <li>View Google Calendar events</li>
+            </ul>
+            Otherwise, your schedule and reminders will not sync.
+          </p>
+        </div>
+
         {error && <div className="inline-alert error-alert">{error}</div>}
 
         <div className="oauth-diagnostic-card">

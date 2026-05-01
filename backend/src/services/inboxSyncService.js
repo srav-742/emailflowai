@@ -417,6 +417,7 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
     for (let i = 0; i < emailsToCategorize.length; i += 20) {
       const batch = emailsToCategorize.slice(i, i + 20);
       const categorizationResults = await categorizeEmailsBatch(batch.map(p => ({
+        id: p.messageId,
         from: p.sender,
         subject: p.subject,
         snippet: p.snippet

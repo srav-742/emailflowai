@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import GmailConnect from './pages/GmailConnect';
 import GmailCallback from './pages/GmailCallback';
@@ -10,7 +11,7 @@ import PricingPage from './pages/PricingPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import CalendarPage from './pages/CalendarPage';
 import DigestSettings from './pages/Settings/DigestSettings';
-import ErrorBoundary from './components/ErrorBoundary';
+import AccountSettings from './pages/Settings/AccountSettings';
 import './index.css';
 
 const LoadingScreen = ({ message = 'Loading EmailFlow AI...' }) => (
@@ -77,23 +78,24 @@ function App() {
             </ProtectedRoute>
           }
         >
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="emails" element={<EmailList title="Inbox command center" description="Search, sort, and process your full email stream." />} />
-          <Route path="finance" element={<EmailList title="Finance queue" description="Invoices, receipts, budgets, and payment approvals." filter={{ category: 'finance' }} />} />
-          <Route path="developer" element={<EmailList title="Developer queue" description="Deployments, pull requests, outages, and engineering updates." filter={{ category: 'developer' }} />} />
-          <Route path="meetings" element={<EmailList title="Meetings and calendar" description="Invites, agendas, scheduling, and follow-ups." filter={{ category: 'meetings' }} />} />
-          <Route path="newsletter" element={<EmailList title="Newsletters and promos" description="Low-noise reads that can wait until later." filter={{ category: 'newsletter' }} />} />
-          <Route path="social" element={<EmailList title="Social and community" description="Community updates, forums, and social notifications." filter={{ category: 'social' }} />} />
+          <Route path="dashboard" element={<ErrorBoundary name="Dashboard"><Dashboard /></ErrorBoundary>} />
+          <Route path="emails" element={<ErrorBoundary name="Inbox"><EmailList title="Inbox command center" description="Search, sort, and process your full email stream." /></ErrorBoundary>} />
+          <Route path="finance" element={<ErrorBoundary name="Finance"><EmailList title="Finance queue" description="Invoices, receipts, budgets, and payment approvals." filter={{ category: 'finance' }} /></ErrorBoundary>} />
+          <Route path="developer" element={<ErrorBoundary name="Developer"><EmailList title="Developer queue" description="Deployments, pull requests, outages, and engineering updates." filter={{ category: 'developer' }} /></ErrorBoundary>} />
+          <Route path="meetings" element={<ErrorBoundary name="Meetings"><CalendarPage /></ErrorBoundary>} />
+          <Route path="newsletter" element={<ErrorBoundary name="Newsletter"><EmailList title="Newsletters and promos" description="Low-noise reads that can wait until later." filter={{ category: 'newsletter' }} /></ErrorBoundary>} />
+          <Route path="social" element={<ErrorBoundary name="Social"><EmailList title="Social and community" description="Community updates, forums, and social notifications." filter={{ category: 'social' }} /></ErrorBoundary>} />
           
           {/* Smart Inbox Tabs */}
-          <Route path="focus" element={<EmailList title="Focus Today" description="High-priority emails that need your immediate attention." filter={{ priority: 'high', actionRequired: true }} />} />
-          <Route path="read-later" element={<EmailList title="Read Later" description="Interesting content saved for when you have more time." filter={{ categoryIn: ['newsletter', 'social'], priority: 'low' }} />} />
-          <Route path="newsletters" element={<EmailList title="Newsletters" description="Latest updates from your favorite publications." filter={{ category: 'newsletter' }} />} />
-          <Route path="waiting" element={<EmailList title="Waiting for Reply" description="Emails where you are expecting a response." filter={{ followUp: true }} />} />
-          <Route path="calendar" element={<CalendarPage />} />
-          <Route path="analytics" element={<AnalyticsPage />} />
-          <Route path="settings/digest" element={<DigestSettings />} />
-          <Route path="pricing" element={<PricingPage />} />
+          <Route path="focus" element={<ErrorBoundary name="FocusToday"><EmailList title="Focus Today" description="High-priority emails that need your immediate attention." filter={{ priority: 'high', actionRequired: true }} /></ErrorBoundary>} />
+          <Route path="read-later" element={<ErrorBoundary name="ReadLater"><EmailList title="Read Later" description="Interesting content saved for when you have more time." filter={{ categoryIn: ['newsletter', 'social'], priority: 'low' }} /></ErrorBoundary>} />
+          <Route path="newsletters" element={<ErrorBoundary name="Newsletters"><EmailList title="Newsletters" description="Latest updates from your favorite publications." filter={{ category: 'newsletter' }} /></ErrorBoundary>} />
+          <Route path="waiting" element={<ErrorBoundary name="WaitingReply"><EmailList title="Waiting for Reply" description="Emails where you are expecting a response." filter={{ followUp: true }} /></ErrorBoundary>} />
+          <Route path="calendar" element={<ErrorBoundary name="Calendar"><CalendarPage /></ErrorBoundary>} />
+          <Route path="analytics" element={<ErrorBoundary name="Analytics"><AnalyticsPage /></ErrorBoundary>} />
+          <Route path="settings/digest" element={<ErrorBoundary name="DigestSettings"><DigestSettings /></ErrorBoundary>} />
+          <Route path="settings/accounts" element={<ErrorBoundary name="AccountSettings"><AccountSettings /></ErrorBoundary>} />
+          <Route path="pricing" element={<ErrorBoundary name="Pricing"><PricingPage /></ErrorBoundary>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,5 +1,6 @@
 const { verifyToken } = require('../utils/jwt');
 const prisma = require('../config/database');
+const cache = require('../lib/cache/redis');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -16,12 +17,20 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-    });
+    const cacheKey = `user:${decoded.id}:session`;
+    let user = await cache.get(cacheKey);
 
     if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+      user = await prisma.user.findUnique({
+        where: { id: decoded.id },
+      });
+
+      if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+      }
+
+      // Cache for 15 min
+      await cache.set(cacheKey, user, 15 * 60);
     }
 
     req.user = {

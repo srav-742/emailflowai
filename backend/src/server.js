@@ -5,6 +5,8 @@ const { Server } = require('socket.io');
 require('dotenv').config();
 
 const authRoutes = require('./routes/authRoutes');
+const { authenticate } = require('./middleware/auth');
+const upstashRateLimit = require('./middleware/rateLimit');
 const emailRoutes = require('./routes/emailRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const streamRoutes = require('./routes/streamRoutes');
@@ -13,6 +15,8 @@ const followUpRoutes = require('./routes/followUpRoutes');
 const digestRoutes = require('./routes/digestRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
+const errorRoutes = require('./routes/errorRoutes');
+const { router: sseRouter } = require('./routes/sse');
 const digestService = require('./services/digestService');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
@@ -112,8 +116,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
 }));
 
-app.use(generalLimiter);
-
 // Security headers — use unsafe-none for COOP to allow Google OAuth popup communication
 app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
@@ -140,9 +142,8 @@ app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => {
   res.status(204).end();
 });
 
-// Strict rate limiting for AI and Auth
-app.use('/api/ai', aiLimiter);
-app.use('/api/auth', aiLimiter);
+// Apply rate limiting to all API routes
+app.use('/api/', upstashRateLimit);
 app.use('/auth', aiLimiter);
 
 // Routes
@@ -155,8 +156,11 @@ app.use('/api/action-items', actionItemRoutes);
 app.use('/api/follow-ups', followUpRoutes);
 app.use('/api/digest', digestRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/errors', errorRoutes);
+app.use('/api/sse', sseRouter);
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/calendar', require('./routes/calendarRoutes'));
+app.use('/api/accounts', require('./routes/accountRoutes'));
 
 // Run analytics aggregation once a day (simulated cron)
 setInterval(() => {

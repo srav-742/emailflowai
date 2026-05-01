@@ -1,49 +1,61 @@
-import { useEffect } from 'react';
-import { useEmailStore } from '../store/emailStore';
+import { useEffect, useRef } from 'react';
 
 /**
- * useSSE
- * 
- * Subscribes to the backend SSE stream for real-time email notifications.
- * Automatically updates the email store when a 'NEW_EMAIL' event is received.
+ * Custom hook to listen for real-time Server-Sent Events.
+ * @param {Function} onNewEmail - Callback for new emails.
+ * @param {Function} onFollowUp - Callback for follow-up reminders.
  */
-export function useSSE(token) {
-  const addEmail = useEmailStore((state) => state.addEmail);
+export function useSSE(onNewEmail, onFollowUp) {
+  const reconnectTimeoutRef = useRef(null);
+  const reconnectDelayRef = useRef(1000); // Start with 1s delay
 
   useEffect(() => {
-    if (!token) return;
+    let es;
 
-    // Connect to the SSE endpoint
-    const streamUrl = `/api/stream?token=${encodeURIComponent(token)}`;
-    const eventSource = new EventSource(streamUrl);
+    const connect = () => {
+      console.log('[SSE] Connecting...');
+      es = new EventSource('/api/sse', { withCredentials: true });
 
-    console.log('[SSE] Connecting to stream...');
+      es.onopen = () => {
+        console.log('[SSE] Connection established');
+        reconnectDelayRef.current = 1000; // Reset delay on success
+      };
 
-    eventSource.onopen = () => {
-      console.log('[SSE] Connection active');
-    };
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('[SSE] Received event:', data.type);
-
-        if (data.type === 'NEW_EMAIL') {
-          addEmail(data.payload);
+      es.addEventListener('new_email', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (onNewEmail) onNewEmail(data);
+        } catch (err) {
+          console.error('[SSE] Failed to parse new_email data', err);
         }
-      } catch (error) {
-        console.error('[SSE] Failed to parse event data:', error);
-      }
+      });
+
+      es.addEventListener('follow_up', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (onFollowUp) onFollowUp(data);
+        } catch (err) {
+          console.error('[SSE] Failed to parse follow_up data', err);
+        }
+      });
+
+      es.onerror = (err) => {
+        console.error('[SSE] Connection error, reconnecting...', err);
+        es.close();
+        
+        // Exponential backoff
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 30000); // Max 30s
+          connect();
+        }, reconnectDelayRef.current);
+      };
     };
 
-    eventSource.onerror = (error) => {
-      console.error('[SSE] Stream error:', error);
-      eventSource.close();
-    };
+    connect();
 
     return () => {
-      console.log('[SSE] Closing connection');
-      eventSource.close();
+      if (es) es.close();
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     };
-  }, [token, addEmail]);
+  }, [onNewEmail, onFollowUp]);
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { emailAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useAccounts } from '../context/AccountContext';
 import { useEmailStore } from '../store/emailStore';
 import { useSSE } from '../hooks/useSSE';
 import EmailCard from '../components/EmailCard';
@@ -12,6 +13,7 @@ import './EmailList.css';
 
 const EmailList = ({ filter = {}, title = 'Inbox command center', description = 'Review and process every thread in one place.' }) => {
   const { user, token } = useAuth();
+  const { selectedAccountId } = useAccounts();
   const emails = useEmailStore((state) => state.emails);
   const setEmails = useEmailStore((state) => state.setEmails);
   const loading = useEmailStore((state) => state.loading);
@@ -28,7 +30,12 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
   const [selectedThreadId, setSelectedThreadId] = useState(null);
 
   // 1. Activate real-time SSE stream
-  useSSE(token);
+  useSSE((newEmails) => {
+    console.log('[SSE] New emails received:', newEmails);
+    setLiveMessage(`Sync complete: ${newEmails.length} new email(s) found. Refreshing your inbox...`);
+    fetchEmails(true); // Refresh list
+    setTimeout(() => setLiveMessage(''), 6000);
+  });
 
   const fetchEmails = useCallback(async (reset = false) => {
     try {
@@ -39,6 +46,7 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
         cursor: currentCursor,
         category: activeTab,
         ...(query ? { q: query } : {}),
+        ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
       };
 
       let response;
@@ -66,11 +74,11 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
     } finally {
       setLoading(false);
     }
-  }, [activeTab, cursor, emails, pagination.limit, query, setEmails, setLoading, viewMode]);
+  }, [activeTab, cursor, emails, pagination.limit, query, setEmails, setLoading, viewMode, selectedAccountId]);
 
   useEffect(() => {
     fetchEmails(true);
-  }, [activeTab, query, viewMode]);
+  }, [activeTab, query, viewMode, selectedAccountId]);
 
   // 2. Fallback: Socket.IO for older browser support or specific event types
   useEffect(() => {

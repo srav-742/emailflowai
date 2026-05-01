@@ -40,8 +40,28 @@ model User {
   analyticsEvents  AnalyticsEvent[]
   analyticsDaily   AnalyticsDaily[]
   calendarEvents   CalendarEvent[]
+  oauthTokens      OAuthToken[]
+  clientErrorLogs  ClientErrorLog[]
 
   @@map("users")
+}
+
+model OAuthToken {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  email        String
+  accessToken  String   @db.Text @map("access_token")
+  refreshToken String   @db.Text @map("refresh_token")
+  tokenExpiry  DateTime @map("token_expiry")
+  scope        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+  @@index([tokenExpiry])
+  @@map("oauth_tokens")
 }
 
 model AITraining {
@@ -101,8 +121,9 @@ model Email {
   actionItems    ActionItem[]
   followUps      FollowUp[]
 
-  @@index([userId, createdAt])
-  @@index([userId, category, receivedAt(sort: Desc)])
+  @@index([userId, receivedAt(sort: Desc)])
+  @@index([userId, category])
+  @@index([userId, receivedAt(sort: Desc), category])
   @@index([threadId])
   @@index([accountId])
   @@index([priority])
@@ -136,6 +157,10 @@ model EmailAccount {
   userId       String   @map("user_id")
   provider     String
   email        String
+  displayName  String?  @map("display_name")
+  isPrimary    Boolean  @default(false) @map("is_primary")
+  color        String?
+  syncEnabled  Boolean  @default(true) @map("sync_enabled")
   accessToken  String?  @db.Text @map("access_token")
   refreshToken String?  @db.Text @map("refresh_token")
   tokenExpiry  DateTime? @map("token_expiry")
@@ -145,6 +170,8 @@ model EmailAccount {
 
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   emails       Email[]
+  actionItems  ActionItem[]
+  followUps    FollowUp[]
 
   @@index([userId])
   @@unique([provider, email])
@@ -187,6 +214,7 @@ model AILog {
 model ActionItem {
   id           String    @id @default(uuid())
   userId       String    @map("user_id")
+  accountId    String?   @map("account_id")
   emailId      String    @map("email_id")
   threadId     String?   @map("thread_id")
   title        String
@@ -200,14 +228,17 @@ model ActionItem {
 
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   email        Email     @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  account      EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
 
   @@index([userId, status, dueDate])
+  @@index([accountId])
   @@map("action_items")
 }
 
 model FollowUp {
   id              String    @id @default(uuid())
   userId          String    @map("user_id")
+  accountId       String?   @map("account_id")
   sentEmailId     String    @map("sent_email_id")
   threadId        String    @map("thread_id")
   recipientEmail  String    @map("recipient_email")
@@ -222,8 +253,10 @@ model FollowUp {
 
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   email           Email     @relation(fields: [sentEmailId], references: [id], onDelete: Cascade)
+  account         EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
 
   @@index([userId, status, remindAt])
+  @@index([accountId])
   @@map("follow_ups")
 }
 
@@ -291,7 +324,7 @@ model AnalyticsEvent {
 
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@index([userId, createdAt(sort: Desc)])
   @@index([eventType])
   @@index([createdAt])
   @@map("analytics_events")
@@ -330,4 +363,20 @@ model CalendarEvent {
 
   @@unique([userId, googleEventId])
   @@map("calendar_events")
+}
+
+model ClientErrorLog {
+  id            String   @id @default(uuid())
+  userId        String?  @map("user_id")
+  errorMessage  String   @map("error_message") @db.Text
+  errorStack    String?  @map("error_stack") @db.Text
+  componentName String?  @map("component_name")
+  pageUrl       String?  @map("page_url")
+  browserInfo   Json?    @map("browser_info")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("client_error_logs")
 }

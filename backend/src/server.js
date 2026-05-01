@@ -278,7 +278,28 @@ io.on('connection', (socket) => {
 // Make io accessible to routes
 app.set('io', io);
 
-startEmailPolling(io);
+// 1. Immediately bind to the port so Render detects the service as alive
+const startApp = async () => {
+  try {
+    server.listen(PORT, () => {
+      console.log(`🚀 [Success] Server is LIVE and listening on port ${PORT}`);
+      
+      // 2. Initialize background services AFTER the port is bound
+      try {
+        startEmailPolling(io);
+        startStyleLearningJob();
+        console.log('✅ [Background] Services initialized.');
+      } catch (serviceError) {
+        console.error('⚠️ [Background] Service warning:', serviceError.message);
+      }
+    });
+  } catch (err) {
+    console.error('❌ [Fatal] Could not bind to port:', err.message);
+    process.exit(1);
+  }
+};
+
+startApp();
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -291,14 +312,6 @@ app.use((err, req, res, next) => {
     code: err.code || 'SERVER_ERROR',
     ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {}),
   });
-});
-
-// Start server
-console.log(`[Port-Check] Attempting to bind to port ${PORT}...`);
-server.listen(PORT, () => {
-  console.log(`🚀 [Success] Server is LIVE and listening on port ${PORT}`);
-  startEmailPolling(io);
-  startStyleLearningJob();
 });
 
 module.exports = { app, io };

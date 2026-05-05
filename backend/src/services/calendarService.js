@@ -1,33 +1,20 @@
-const { google } = require('googleapis');
 const prisma = require('../config/database');
-const tokenService = require('./tokenService');
+const { getCalendarClient } = require('../lib/google/getAuthClient');
 
 /**
  * Sync Google Calendar events for the next 7 days.
  */
 async function syncCalendar(userId) {
   try {
-    const accessToken = await tokenService.getValidAccessToken(userId);
-    
-    // We need the refresh token to set in the client if we want to listen for refreshes,
-    // though getValidAccessToken already handles persistence.
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { refreshToken: true }
+      select: { email: true }
     });
 
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
+    if (!user?.email) throw new Error('User email not found for calendar sync.');
 
-    oauth2Client.setCredentials({
-      access_token: accessToken,
-      refresh_token: user?.refreshToken
-    });
-
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const calendar = await getCalendarClient(userId, user.email);
+    
     
     const timeMin = new Date().toISOString();
     const timeMax = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -92,31 +79,21 @@ async function syncCalendar(userId) {
  */
 async function addReminder(userId, actionItemId) {
   try {
-    const [accessToken, actionItem, user] = await Promise.all([
-      tokenService.getValidAccessToken(userId),
+    const [actionItem, user] = await Promise.all([
       prisma.actionItem.findUnique({
         where: { id: actionItemId }
       }),
       prisma.user.findUnique({
         where: { id: userId },
-        select: { refreshToken: true }
+        select: { email: true }
       })
     ]);
 
+    if (!actionItem) throw new Error('Action item not found.');
     if (!actionItem.dueDate) throw new Error('Action item has no due date.');
+    if (!user?.email) throw new Error('User email not found.');
 
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
-
-    oauth2Client.setCredentials({
-      access_token: accessToken,
-      refresh_token: user?.refreshToken
-    });
-
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const calendar = await getCalendarClient(userId, user.email);
 
     const event = {
       summary: `Task: ${actionItem.title}`,

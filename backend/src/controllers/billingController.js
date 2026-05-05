@@ -40,6 +40,11 @@ const handleWebhook = async (req, res) => {
   let event;
 
   try {
+    if (!stripeService.stripe) {
+      console.error('[Webhook Error] Stripe is not configured.');
+      return res.status(503).json({ error: 'Stripe service unavailable' });
+    }
+
     event = stripeService.stripe.webhooks.constructEvent(
       req.body, // This MUST be the raw body
       sig,

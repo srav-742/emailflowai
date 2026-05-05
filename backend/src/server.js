@@ -37,9 +37,21 @@ console.log('🚀 [BOOT] Attempting to bind port:', PORT);
 // Safe background startup
 const startServer = async () => {
   try {
+    console.log(`📡 [BOOT] Attempting to listen on 0.0.0.0:${PORT}`);
+    
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`❌ [CRITICAL] Port ${PORT} is already in use`);
+      } else {
+        console.error('❌ [CRITICAL] Server error:', err.message);
+      }
+      process.exit(1);
+    });
+
     // Open port immediately
     server.listen(PORT, '0.0.0.0', () => {
       console.log('✅ [LIVE] Server started on port:', PORT);
+      console.log('🔗 [Health] Health check available at: /api/health');
       
       // Initialize other services safely
       initBackgroundServices().catch(err => {
@@ -47,7 +59,7 @@ const startServer = async () => {
       });
     });
   } catch (err) {
-    console.error('❌ [CRITICAL] Failed to bind port:', err.message);
+    console.error('❌ [CRITICAL] Failed to initiate server.listen:', err.message);
     process.exit(1);
   }
 };
@@ -62,7 +74,8 @@ async function initBackgroundServices() {
   startStyleLearningJob();
 }
 
-startServer();
+// startServer() call moved to bottom of file
+
 
 console.log('[Startup] Initializing EmailFlow AI Backend...');
 
@@ -312,3 +325,6 @@ io.on('connection', (socket) => {
 app.set('io', io);
 
 module.exports = { app, io };
+
+startServer();
+

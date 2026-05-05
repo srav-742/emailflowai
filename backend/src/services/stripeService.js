@@ -1,9 +1,19 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripeKey = process.env.STRIPE_SECRET_KEY;
+const stripe = stripeKey ? require('stripe')(stripeKey) : null;
+
+if (!stripe) {
+  console.warn('⚠️ [Stripe] STRIPE_SECRET_KEY is missing. Stripe features will be disabled.');
+}
+
 const prisma = require('../config/database');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 const createCheckoutSession = async (userId, priceId) => {
+  if (!stripe) {
+    throw new Error('Stripe is not configured. Please add STRIPE_SECRET_KEY to your .env file.');
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { subscription: true }
@@ -33,6 +43,10 @@ const createCheckoutSession = async (userId, priceId) => {
 };
 
 const createPortalSession = async (userId) => {
+  if (!stripe) {
+    throw new Error('Stripe is not configured. Please add STRIPE_SECRET_KEY to your .env file.');
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { subscription: true }
@@ -51,6 +65,8 @@ const createPortalSession = async (userId) => {
 };
 
 const handleWebhook = async (event) => {
+  if (!stripe) return;
+
   const { type, data } = event;
 
   switch (type) {
@@ -74,6 +90,8 @@ const handleWebhook = async (event) => {
 };
 
 const updateSubscription = async (customerId, subscriptionId) => {
+  if (!stripe) return;
+
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   const user = await prisma.user.findFirst({
     where: { 

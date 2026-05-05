@@ -94,7 +94,13 @@ async function persistGmailTokens(userId, tokens) {
       accessToken: encrypt(tokens.access_token),
       refreshToken: encrypt(tokens.refresh_token),
       tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600 * 1000),
-      scope: tokens.scope || 'https://www.googleapis.com/auth/gmail.readonly',
+      scope: tokens.scope || [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/calendar.events'
+      ].join(' '),
     },
   });
 

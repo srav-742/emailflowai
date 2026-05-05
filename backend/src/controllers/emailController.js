@@ -464,7 +464,7 @@ const getStats = async (req, res) => {
 
 const syncEmails = async (req, res) => {
   try {
-    const { accountId } = req.body;
+    const { accountId } = { ...req.query, ...req.body };
     const result = await syncInbox(req.user.id, 100, { returnMeta: true, accountId });
     const io = req.app.get('io');
 

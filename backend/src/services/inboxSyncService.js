@@ -373,6 +373,7 @@ async function persistEmail(userId, payload, existingEmail) {
 
 async function syncInboxInternal(userId, maxResults = 35, options = {}) {
   const { returnMeta = false, accountId = null } = options;
+  console.log(`[Sync] Starting sync for user ${userId}, account: ${accountId || 'primary'}`);
   // Validates Gmail is connected; the token check happens inside getAuthenticatedGmailClient.
   await getAuthenticatedUser(userId);
   // Build the Gmail client with a guaranteed-fresh access token.
@@ -527,8 +528,11 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
     return returnMeta ? result : result.emails;
   } catch (error) {
     if (!isRecoverableGmailError(error)) {
+      console.error(`[Sync] Non-recoverable error for user ${userId}:`, error.message);
       throw error;
     }
+
+    console.warn(`[Sync] Recoverable error detected for user ${userId}:`, error.message || error);
 
     const fallback = {
       emails: await getCachedInboxSnapshot(userId, maxResults),

@@ -5,9 +5,11 @@ services:
     plan: starter
     region: oregon
     rootDirectory: backend
-    buildCommand: npm install && npx prisma generate
+    buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
+      - key: PORT
+        value: 10000
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL

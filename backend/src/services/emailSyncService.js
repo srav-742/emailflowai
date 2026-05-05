@@ -48,12 +48,16 @@ async function pollInbox(io) {
         });
 
         // Sync legacy account if it has tokens
+        console.log(`[Sync] Checking legacy tokens for ${user.email}:`, { hasAccess: !!legacyUser?.accessToken, hasRefresh: !!legacyUser?.refreshToken });
         if (legacyUser?.accessToken || legacyUser?.refreshToken) {
+          console.log(`[Sync] Triggering legacy sync for ${user.email}`);
           await syncAndNotify(io, user, null); 
         }
 
         // Sync all new-style accounts
+        console.log(`[Sync] Found ${accounts.length} linked accounts for ${user.email}`);
         for (const account of accounts) {
+          console.log(`[Sync] Triggering sync for account: ${account.email} (${account.id})`);
           await syncAndNotify(io, user, account.id);
         }
 

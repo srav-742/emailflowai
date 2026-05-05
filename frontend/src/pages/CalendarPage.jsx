@@ -32,7 +32,12 @@ const CalendarPage = () => {
       });
       await fetchEvents();
     } catch (err) {
-      setError('Sync failed. You might need to re-connect your Gmail to authorize calendar access.');
+      const msg = err.response?.data?.error || err.message;
+      if (msg.toLowerCase().includes('scope') || msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('auth')) {
+        setError('Authorization Required. Please ensure you have granted calendar access by reconnecting your account.');
+      } else {
+        setError(`Sync failed: ${msg}`);
+      }
     } finally {
       setSyncing(false);
     }

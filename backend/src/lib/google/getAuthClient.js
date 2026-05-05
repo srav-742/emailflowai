@@ -24,7 +24,18 @@ async function getAuthClient(userId, email) {
     });
 
     if (!legacyAccount || !legacyAccount.refreshToken) {
-      throw new Error(`No OAuth tokens found for user ${userId} and email ${email}`);
+      // Final Fallback: Check the primary User table
+      console.log(`[OAuth] No tokens in EmailAccount for ${email}, checking primary User table...`);
+      const primaryUser = await prisma.user.findUnique({
+        where: { id: userId }
+      });
+
+      if (!primaryUser || !primaryUser.refreshToken || primaryUser.email !== email) {
+        console.error(`[OAuth] No tokens found for ${email} in any table.`);
+        throw new Error(`No OAuth tokens found for user ${userId} and email ${email}`);
+      }
+      
+      return await migrateAndGetClient(userId, email, primaryUser);
     }
 
     // Migrate legacy tokens to the new table
@@ -65,6 +76,9 @@ async function getAuthClient(userId, email) {
       console.log(`[OAuth] Refreshed access token for ${email}`);
     } catch (error) {
       console.error(`[OAuth] Failed to refresh token for ${email}:`, error.message);
+      if (error.message.includes('invalid_grant') || error.message.includes('revoked')) {
+        console.warn(`[OAuth] Refresh token is invalid/revoked for ${email}. Re-auth required.`);
+      }
       throw error;
     }
   }
@@ -85,7 +99,13 @@ async function migrateAndGetClient(userId, email, legacyAccount) {
       accessToken: encrypt(legacyAccount.accessToken),
       refreshToken: encrypt(legacyAccount.refreshToken),
       tokenExpiry: legacyAccount.tokenExpiry || new Date(Date.now() + 3600 * 1000), // Default 1h if missing
-      scope: 'https://www.googleapis.com/auth/gmail.readonly' // Default scope
+      scope: legacyAccount.scope || [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/calendar.events'
+      ].join(' ')
     }
   });
 

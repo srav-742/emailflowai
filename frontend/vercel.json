@@ -4,11 +4,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://emailflowai-api.onrender.com/api/:path*"
+      "destination": "https://emailflowai.onrender.com/api/:path*"
     },
     {
       "source": "/auth/:path*",
-      "destination": "https://emailflowai-api.onrender.com/auth/:path*"
+      "destination": "https://emailflowai.onrender.com/auth/:path*"
     },
     {
       "source": "/(.*)",
@@ -16,6 +16,8 @@
     }
   ],
   "env": {
-    "VITE_API_URL": "https://emailflowai-api.onrender.com"
+    "VITE_API_URL": "https://emailflowai.onrender.com/api",
+    "VITE_SOCKET_URL": "https://emailflowai.onrender.com"
   }
 }
+

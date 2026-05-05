@@ -30,38 +30,24 @@ const { startStyleLearningJob } = require('./jobs/styleLearningJob');
 
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 10000;
+
+// NUCLEAR OPTION: Open port IMMEDIATELY to satisfy Render's health check
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('🔥 [RENDER-FIX] PORT BIND SUCCESSFUL:', PORT);
+  console.log('🚀 [BOOT] Initializing services in background...');
+  initBackgroundServices().catch(err => {
+    console.error('⚠️ [INIT] Background service warning:', err.message);
+  });
+});
 
 console.log('🚀 [BOOT] Attempting to bind port:', PORT);
 
 // Safe background startup
 const startServer = async () => {
-  try {
-    console.log(`📡 [BOOT] Attempting to listen on 0.0.0.0:${PORT}`);
-    
-    server.on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.error(`❌ [CRITICAL] Port ${PORT} is already in use`);
-      } else {
-        console.error('❌ [CRITICAL] Server error:', err.message);
-      }
-      process.exit(1);
-    });
-
-    // Open port immediately
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log('✅ [LIVE] Server started on port:', PORT);
-      console.log('🔗 [Health] Health check available at: /api/health');
-      
-      // Initialize other services safely
-      initBackgroundServices().catch(err => {
-        console.error('⚠️ [INIT] Background service warning:', err.message);
-      });
-    });
-  } catch (err) {
-    console.error('❌ [CRITICAL] Failed to initiate server.listen:', err.message);
-    process.exit(1);
-  }
+  // Logic moved to top for immediate port binding
+  console.log('📡 [BOOT] startServer() called (port already opening)');
 };
 
 async function initBackgroundServices() {
@@ -104,7 +90,7 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-const server = http.createServer(app);
+// server definition moved to top
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'http://localhost:5173',

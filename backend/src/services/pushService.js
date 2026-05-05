@@ -1,12 +1,26 @@
 const webpush = require('web-push');
 const prisma = require('../config/database');
 
-// Configure VAPID details
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || 'mailto:admin@emailflowai.com',
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+// Configure VAPID details — only if keys are present; missing keys must not crash on boot
+if (
+  process.env.VAPID_PUBLIC_KEY &&
+  process.env.VAPID_PRIVATE_KEY &&
+  process.env.VAPID_PUBLIC_KEY !== 'undefined' &&
+  process.env.VAPID_PRIVATE_KEY !== 'undefined'
+) {
+  try {
+    webpush.setVapidDetails(
+      process.env.VAPID_SUBJECT || 'mailto:admin@emailflowai.com',
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+    console.log('[PushService] VAPID keys configured successfully.');
+  } catch (err) {
+    console.warn('[PushService] Failed to configure VAPID keys (push notifications disabled):', err.message);
+  }
+} else {
+  console.warn('[PushService] VAPID keys are missing. Push notifications will be disabled.');
+}
 
 /**
  * Sends a push notification to all active subscriptions of a user.

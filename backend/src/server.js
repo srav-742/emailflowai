@@ -1,4 +1,13 @@
 console.log('🔥 [BOOT] FILE STARTED');
+
+// --- Global error handlers: make ALL crashes visible in Render logs ---
+process.on('uncaughtException', (err) => {
+  console.error('💥 [UNCAUGHT EXCEPTION]', err.message, err.stack);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 [UNHANDLED REJECTION]', reason);
+});
 const express = require('express');
 const cors = require('cors');
 const http = require('http');

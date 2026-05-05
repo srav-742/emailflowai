@@ -1,6 +1,12 @@
 {
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "echo 'skipping root install'",
-  "framework": null
+  "installCommand": "echo 'skip'",
+  "framework": null,
+  "build": {
+    "env": {
+      "VITE_API_URL": "https://emailflowai.onrender.com/api",
+      "VITE_SOCKET_URL": "https://emailflowai.onrender.com"
+    }
+  }
 }

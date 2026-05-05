@@ -1,6 +1,8 @@
 {
   "version": 2,
   "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -15,6 +17,12 @@
       "destination": "/index.html"
     }
   ],
+  "build": {
+    "env": {
+      "VITE_API_URL": "https://emailflowai.onrender.com/api",
+      "VITE_SOCKET_URL": "https://emailflowai.onrender.com"
+    }
+  },
   "env": {
     "VITE_API_URL": "https://emailflowai.onrender.com/api",
     "VITE_SOCKET_URL": "https://emailflowai.onrender.com"

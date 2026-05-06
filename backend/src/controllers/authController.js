@@ -109,18 +109,20 @@ async function persistGmailTokens(userId, tokens) {
 
 const firebaseGoogleLogin = async (req, res) => {
   try {
-    const { idToken } = req.body;
+    const { idToken, token } = req.body;
+    const firebaseToken = idToken || token;
 
-    if (!idToken) {
+    if (!firebaseToken) {
       return res.status(400).json({ error: 'Firebase ID token is required' });
     }
 
     let decodedToken;
 
     try {
-      decodedToken = await verifyIdToken(idToken);
+      decodedToken = await verifyIdToken(firebaseToken);
+      console.log("Decoded Token:", decodedToken);
     } catch (tokenError) {
-      console.error('Firebase token verification failed:', tokenError.message);
+      console.error('Firebase token verification failed:', tokenError);
       return res.status(401).json({
         error: `Invalid Firebase token: ${tokenError.message}`,
       });
@@ -132,6 +134,7 @@ const firebaseGoogleLogin = async (req, res) => {
     const picture = decodedToken.picture;
 
     if (!email) {
+      console.error("Decoded token missing email:", decodedToken);
       return res.status(400).json({ error: 'Email not found in token' });
     }
 
@@ -168,9 +171,9 @@ const firebaseGoogleLogin = async (req, res) => {
       user: serializeUser(user),
     });
   } catch (error) {
-    console.error('Firebase Google login error:', error.message);
+    console.error('Auth Error:', error);
     if (!res.headersSent) {
-      res.status(401).json({ error: `Authentication failed: ${error.message}` });
+      res.status(401).json({ error: error.message || 'Authentication failed' });
     }
   }
 };

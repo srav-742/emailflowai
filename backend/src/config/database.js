@@ -4,7 +4,9 @@ const { PrismaClient } = require('@prisma/client');
 
 const pool = new Pool({ 
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') 
+  ssl: process.env.DATABASE_URL && 
+       !process.env.DATABASE_URL.includes('localhost') && 
+       process.env.DATABASE_URL.includes('.') // Internal Render URLs usually have no dots in the hostname
     ? { rejectUnauthorized: false } 
     : false
 });

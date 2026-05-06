@@ -1,11 +1,25 @@
 const { google } = require('googleapis');
 
 function getConfiguredRedirectUri() {
-  return process.env.GOOGLE_REDIRECT_URI || `http://localhost:${process.env.PORT || 5000}/api/auth/gmail/callback`;
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  
+  // Auto-detect Render environment
+  if (process.env.RENDER_EXTERNAL_URL) {
+    return `${process.env.RENDER_EXTERNAL_URL}/api/auth/gmail/callback`;
+  }
+  
+  return `http://localhost:${process.env.PORT || 5000}/api/auth/gmail/callback`;
 }
 
 function getConfiguredFrontendUrl() {
-  return process.env.FRONTEND_URL || 'http://localhost:5173';
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
+  
+  // Default for this project's production frontend
+  if (process.env.NODE_ENV === 'production') {
+    return 'https://emailflowai-ai.vercel.app'; // Recommended Vercel URL
+  }
+
+  return 'http://localhost:5173';
 }
 
 function getGmailOAuthConfig() {

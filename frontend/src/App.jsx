@@ -5,6 +5,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import GmailConnect from './pages/GmailConnect';
 import GmailCallback from './pages/GmailCallback';
+import LandingPage from './pages/LandingPage';
 import Dashboard from './pages/Dashboard';
 import EmailList from './pages/EmailList';
 import PricingPage from './pages/PricingPage';
@@ -38,7 +39,7 @@ const PublicRoute = ({ children }) => {
 const HomeRoute = () => {
   const { token, loading } = useAuth();
   if (loading) return <LoadingScreen message="Preparing your workspace..." />;
-  return token ? <Navigate to="/dashboard" replace /> : <Login />;
+  return token ? <Navigate to="/dashboard" replace /> : <LandingPage />;
 };
 
 function App() {

@@ -173,7 +173,7 @@ app.use(cors({
     }
     
     // Explicitly check for specific production domains if FRONTEND_URL is missing
-    const extraAllowed = ['https://email-flow-ai.vercel.app'];
+    const extraAllowed = ['https://emailflowai.vercel.app'];
     if (extraAllowed.includes(origin)) {
       return callback(null, true);
     }

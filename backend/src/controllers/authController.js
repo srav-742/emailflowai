@@ -23,6 +23,34 @@ function serializeUser(user) {
   };
 }
 
+function isDatabaseUnavailableError(error) {
+  const message = String(error?.message || '');
+  const code = String(error?.code || '');
+
+  return (
+    code === 'P1001' ||
+    code === 'P1002' ||
+    message.includes("Can't reach database server") ||
+    message.includes('database server') ||
+    message.includes('ECONNREFUSED') ||
+    message.includes('ENOTFOUND') ||
+    message.includes('ETIMEDOUT')
+  );
+}
+
+function sendAuthError(res, error, fallbackMessage) {
+  if (isDatabaseUnavailableError(error)) {
+    return res.status(503).json({
+      error: 'Authentication temporarily unavailable',
+      details: 'Database connection failed while completing sign-in.',
+    });
+  }
+
+  return res.status(500).json({
+    error: fallbackMessage,
+  });
+}
+
 async function persistGmailTokens(userId, tokens) {
   const existingUser = await prisma.user.findUnique({
     where: { id: userId },
@@ -173,7 +201,7 @@ const firebaseGoogleLogin = async (req, res) => {
   } catch (error) {
     console.error('Auth Error:', error);
     if (!res.headersSent) {
-      res.status(401).json({ error: error.message || 'Authentication failed' });
+      return sendAuthError(res, error, error.message || 'Authentication failed');
     }
   }
 };
@@ -193,8 +221,8 @@ const saveGmailTokens = async (req, res) => {
       user: serializeUser(user),
     });
   } catch (error) {
-    console.error('Save Gmail tokens error:', error.message);
-    res.status(500).json({ error: 'Failed to save Gmail connection' });
+    console.error('Save Gmail tokens error:', error);
+    return sendAuthError(res, error, 'Failed to save Gmail connection');
   }
 };
 
@@ -226,7 +254,7 @@ const getProfile = async (req, res) => {
     res.json({ user: serializeUser(user) });
   } catch (error) {
     console.error('Get profile error:', error);
-    res.status(500).json({ error: 'Failed to fetch profile' });
+    return sendAuthError(res, error, 'Failed to fetch profile');
   }
 };
 

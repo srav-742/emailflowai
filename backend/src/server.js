@@ -1,3 +1,4 @@
+require('dotenv').config();
 console.log('🔥 [BOOT] FILE STARTED');
 
 // --- Global error handlers: make ALL crashes visible in Render logs ---
@@ -12,7 +13,6 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
-require('dotenv').config();
 
 const authRoutes = require('./routes/authRoutes');
 const { authenticate } = require('./middleware/auth');

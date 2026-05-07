@@ -6,43 +6,64 @@ let firebaseApp;
 
 if (!admin.apps.length) {
   try {
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+    if (privateKey) {
+      // Handle cases where the private key might be wrapped in quotes or have escaped newlines
+      privateKey = privateKey.replace(/^"|"$/g, '').replace(/\\n/g, '\n');
+    }
+
+    console.log(`[Firebase] Initializing for project: ${projectId || 'unknown'}`);
+
     // Option 1 (PREFERRED for production/Render): Use individual env vars
-    if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+    if (clientEmail && privateKey && projectId) {
+      console.log('[Firebase] Using environment variables for authentication');
       firebaseApp = admin.initializeApp({
         credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+          projectId,
+          clientEmail,
+          privateKey,
         }),
+        projectId, // Explicitly set at top level as well
       });
     }
-    // Option 2: Use service account key file (only when env vars aren't set)
+    // Option 2: Use service account key file
     else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       try {
+        console.log(`[Firebase] Using service account file: ${process.env.FIREBASE_SERVICE_ACCOUNT}`);
         const serviceAccountPath = path.resolve(__dirname, '..', '..', process.env.FIREBASE_SERVICE_ACCOUNT);
         const serviceAccount = require(serviceAccountPath);
         firebaseApp = admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
-          projectId: process.env.FIREBASE_PROJECT_ID,
+          projectId: serviceAccount.project_id || projectId,
         });
       } catch (fileErr) {
-        console.warn('Firebase service account file not found, skipping:', fileErr.message);
+        console.warn('[Firebase] Service account file not found or invalid:', fileErr.message);
       }
     }
-    // Option 3: Use Application Default Credentials (local dev fallback)
-    else {
+    
+    // If still not initialized, try Option 3 or fail
+    if (!firebaseApp && projectId) {
+      console.log('[Firebase] Falling back to default credentials with projectId');
       firebaseApp = admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID,
+        projectId,
       });
     }
 
     if (firebaseApp) {
-      console.log('Firebase Admin initialized successfully');
+      console.log('[Firebase] Admin initialized successfully');
     } else {
-      console.error('Firebase Admin initialization error: No valid credentials found. Set FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in environment variables.');
+      const missing = [];
+      if (!projectId) missing.push('FIREBASE_PROJECT_ID');
+      if (!clientEmail) missing.push('FIREBASE_CLIENT_EMAIL');
+      if (!privateKey) missing.push('FIREBASE_PRIVATE_KEY');
+      
+      console.error(`[Firebase] Initialization failed. Missing variables: ${missing.join(', ')}`);
     }
   } catch (error) {
-    console.error('Firebase Admin initialization error:', error.message);
+    console.error('[Firebase] Critical initialization error:', error.message);
   }
 }
 

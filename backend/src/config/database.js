@@ -17,14 +17,14 @@ const databaseUrl = process.env.DATABASE_URL;
 const databaseHost = getDatabaseHost(databaseUrl);
 
 if (!databaseUrl) {
-  throw new Error('[DB] DATABASE_URL is missing');
+  console.error('[DB] DATABASE_URL is missing');
 }
 
 if (!databaseHost) {
-  throw new Error('[DB] DATABASE_URL is invalid or unparsable');
+  console.warn('[DB] DATABASE_URL is invalid or unparsable');
+} else {
+  console.log(`[DB] Configured host: ${databaseHost}`);
 }
-
-console.log(`[DB] Configured host: ${databaseHost}`);
 
 const adapter = new PrismaPg({
   connectionString: databaseUrl,

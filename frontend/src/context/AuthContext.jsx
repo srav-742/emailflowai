@@ -70,10 +70,13 @@ export const AuthProvider = ({ children }) => {
       if (error.code === 'auth/popup-closed-by-user') {
         throw new Error('Login cancelled by user');
       }
+      if (error?.response?.status === 503) {
+        throw new Error('Sign-in is temporarily unavailable while the server reconnects to the database. Please try again in a moment.');
+      }
       if (error.response?.data?.error) {
         throw new Error(error.response.data.error);
       }
-      throw error;
+      throw new Error(error?.message || 'Failed to sign in with Google. Please try again.');
     }
   }, []);
 

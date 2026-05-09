@@ -17,6 +17,17 @@
       "destination": "/index.html"
     }
   ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "unsafe-none"
+        }
+      ]
+    }
+  ],
   "build": {
     "env": {
       "VITE_API_URL": "https://emailflowai.onrender.com/api",

@@ -10,7 +10,6 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
   const [reply, setReply] = useState('');
   const [editing, setEditing] = useState(false);
   const [editedReply, setEditedReply] = useState('');
-  const [styleProfile, setStyleProfile] = useState(null);
 
   const normalizeReply = (value = '') => String(value).replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
 
@@ -25,7 +24,6 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
       
       setReply(generatedReply);
       setEditedReply(generatedReply);
-      setStyleProfile(response.data.style || null);
     } catch (error) {
       console.error('Reply generation error:', error);
       setStatus('Reply draft could not be generated right now.');
@@ -95,12 +93,6 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
           </div>
         </div>
       </div>
-
-      {styleProfile?.ready && (
-        <div className="inline-alert" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>
-          Mimicking your voice: <strong>{styleProfile.tone}</strong> tone, <strong>{styleProfile.sentenceLength}</strong> sentences.
-        </div>
-      )}
 
       {(reply || editedReply) && (
         <div className="reply-editor" style={{ background: 'rgba(0,0,0,0.2)', padding: '1.2rem', borderRadius: 'var(--radius-md)' }}>

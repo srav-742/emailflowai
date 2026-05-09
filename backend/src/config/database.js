@@ -1,3 +1,4 @@
+const { Pool } = require('pg');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { PrismaClient } = require('@prisma/client');
 
@@ -7,32 +8,59 @@ function getDatabaseHost(connectionString) {
   }
 
   try {
-    return new URL(connectionString).hostname || null;
+    const url = new URL(connectionString);
+    return url.hostname || 'localhost';
   } catch (error) {
-    return null;
+    return 'invalid-url';
   }
 }
 
-const databaseUrl = process.env.DATABASE_URL;
-const databaseHost = getDatabaseHost(databaseUrl);
+let databaseUrl = process.env.DATABASE_URL;
+
+if (databaseUrl) {
+  // Clean up the URL: remove quotes and whitespace that might be added by Render dashboard
+  databaseUrl = databaseUrl.replace(/^["']|["']$/g, '').trim();
+}
 
 if (!databaseUrl) {
-  console.error('[DB] DATABASE_URL is missing');
-}
-
-if (!databaseHost) {
-  console.warn('[DB] DATABASE_URL is invalid or unparsable');
+  console.error('❌ [DB] FATAL: DATABASE_URL is missing from environment variables!');
 } else {
-  console.log(`[DB] Configured host: ${databaseHost}`);
+  const host = getDatabaseHost(databaseUrl);
+  console.log(`🐘 [DB] Connecting to host: ${host}`);
 }
 
-const adapter = new PrismaPg({
+// Create a connection pool with SSL configured for Render
+// We use a pool to ensure we can handle multiple concurrent connections efficiently
+const pool = new Pool({
   connectionString: databaseUrl,
+  ssl: databaseUrl && databaseUrl.includes('render.com') ? {
+    rejectUnauthorized: false
+  } : false,
+  connectionTimeoutMillis: 5000, // 5 second timeout
 });
+
+pool.on('error', (err) => {
+  console.error('💥 [DB] Unexpected error on idle client', err.message);
+});
+
+const adapter = new PrismaPg(pool);
 
 const prisma = new PrismaClient({
   adapter,
-  log: ['error'],
+  log: ['error', 'warn'],
 });
 
+// Test connection immediately
+prisma.$connect()
+  .then(() => {
+    console.log('✅ [DB] Prisma connected successfully');
+  })
+  .catch((err) => {
+    console.error('❌ [DB] Prisma connection failed:', err.message);
+    if (err.message.includes('denied access')) {
+      console.error('👉 TIP: Check if your database user has access to the specified database name.');
+    }
+  });
+
 module.exports = prisma;
+

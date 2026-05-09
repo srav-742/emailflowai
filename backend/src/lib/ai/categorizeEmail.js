@@ -21,9 +21,13 @@ async function categorizeEmail(emailData) {
     1. focus_today: Urgent, needs attention now, requires a reply or action within 24h.
     2. read_later: Informational, non-urgent, news, reports, or articles that can be read later.
     3. newsletter: Bulk marketing, subscriptions, promotions.
-    4. other: Anything else that doesn't fit the above.
+    4. finance: Invoices, receipts, bank statements, billing, payments.
+    5. developer: Deploys, incidents, pull requests, technical alerts, GitHub/GitLab notifications.
+    6. social: Social media notifications (LinkedIn, Twitter, etc.), community updates.
+    7. meetings: Calendar invites, meeting reminders, zoom links.
+    8. other: Anything else that doesn't fit the above.
 
-    Return ONLY a JSON object: {"category": "focus_today" | "read_later" | "newsletter" | "other", "confidence": float}
+    Return ONLY a JSON object: {"category": "focus_today" | "read_later" | "newsletter" | "finance" | "developer" | "social" | "meetings" | "other", "confidence": float}
     
     Email Details:
     From: ${from}
@@ -94,10 +98,14 @@ async function categorizeEmailsBatch(emailsData) {
 
   const prompt = `
     Classify each of the following emails into one of these categories:
-    1. focus_today: Urgent, needs attention now, requires a reply or action within 24h.
-    2. read_later: Informational, non-urgent, news, reports, or articles that can be read later.
-    3. newsletter: Bulk marketing, subscriptions, promotions.
-    4. other: Anything else.
+    1. focus_today: Urgent, needs attention now.
+    2. read_later: Informational, non-urgent content.
+    3. newsletter: Bulk marketing, publications.
+    4. finance: Invoices, receipts, billing.
+    5. developer: Deploys, technical updates, incidents.
+    6. social: Social media, community.
+    7. meetings: Calendar, invites.
+    8. other: Anything else.
 
     Return ONLY a JSON array of objects, one for each email in order:
     [{"category": "...", "confidence": float}, ...]

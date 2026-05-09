@@ -75,6 +75,199 @@ function parseEmailContent(emailContent = '') {
   };
 }
 
+function isUsefulText(value = '') {
+  const text = String(value || '').trim();
+  return Boolean(text) && !/no summary available/i.test(text);
+}
+
+function normalizeList(values = [], limit = 5) {
+  return Array.isArray(values)
+    ? values.map((value) => String(value || '').trim()).filter(Boolean).slice(0, limit)
+    : [];
+}
+
+function normalizePriority(value = 'medium') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'normal') return 'medium';
+  if (['high', 'medium', 'low'].includes(normalized)) return normalized;
+  return 'medium';
+}
+
+function formatSenderLabel(sender = '') {
+  const raw = String(sender || '').trim();
+  if (!raw) return 'Unknown sender';
+
+  const match = raw.match(/^(.*?)\s*<.+>$/);
+  return (match?.[1] || raw).replace(/["']/g, '').trim() || raw;
+}
+
+function inferCompanyLabel(sender = '', subject = '') {
+  const senderLabel = formatSenderLabel(sender);
+  if (senderLabel && !senderLabel.includes('@')) {
+    return senderLabel;
+  }
+
+  const domainMatch = String(sender || '').match(/@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
+  if (domainMatch?.[1]) {
+    const parts = domainMatch[1].replace(/^mail\./i, '').split('.');
+    if (parts.length > 1) {
+      return parts[0]
+        .split(/[-_]/)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
+  }
+
+  const subjectMatch = String(subject || '').match(/\b(?:at|from)\s+([A-Z][A-Za-z0-9&.\- ]{2,40})/);
+  return subjectMatch?.[1]?.trim() || senderLabel || 'Unknown contact';
+}
+
+function extractFirstUrl(value = '') {
+  const text = String(value || '');
+  // More robust URL extraction, avoiding common image/tracking patterns
+  const matches = text.matchAll(/https?:\/\/\S+/gi);
+  const ignorePatterns = [
+    /sendgrid\.net/i, /doubleclick\.net/i, /google-analytics\.com/i, 
+    /pixel/i, /track/i, /open/i, /beacon/i, /logo/i, /\.png/i, /\.jpg/i, /\.gif/i, /\.jpeg/i, /\.svg/i,
+    /favicon/i, /static/i, /assets/i
+  ];
+
+  for (const match of matches) {
+    const url = match[0].replace(/[)>.,'"]+$/g, '');
+    if (!ignorePatterns.some(p => p.test(url))) {
+      return url;
+    }
+  }
+  return null;
+}
+
+function extractDeadlineText(value = '') {
+  const match = String(value || '').match(
+    /\b(?:by|before|due|on)\s+(?:today|tonight|tomorrow|eod|eow|next\s+\w+|this\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|[A-Z][a-z]+\s+\d{1,2}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/i,
+  );
+  return match ? match[0] : null;
+}
+
+function formatRuleSummary(summary = '') {
+  return String(summary || '')
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith('OVERVIEW:')) return `What this email means: ${trimmed.slice('OVERVIEW:'.length).trim()}`;
+      if (trimmed.startsWith('ACTION:')) return `Next step: ${trimmed.slice('ACTION:'.length).trim()}`;
+      if (trimmed.startsWith('TIMELINE:')) return `Timeline: ${trimmed.slice('TIMELINE:'.length).trim()}`;
+      return trimmed;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function scoreBriefingEmail(email = {}) {
+  const text = `${email.subject || ''} ${email.body || email.snippet || ''}`.toLowerCase();
+  let score = 0;
+
+  if (email.actionRequired) score += 120;
+  if (email.priority === 'high') score += 100;
+  if (email.priority === 'normal') score += 45;
+  if (email.isRead === false) score += 20;
+
+  if (['developer', 'finance', 'meetings', 'focus_today', 'operations', 'clients', 'legal'].includes(email.category)) {
+    score += 35;
+  }
+
+  if (['newsletter', 'social', 'read_later'].includes(email.category)) {
+    score -= 60;
+  }
+
+  if (/\b(reply|respond|deadline|interview|assessment|deploy|incident|meeting|invoice|payment|action required|follow up)\b/.test(text)) {
+    score += 35;
+  }
+
+  if (/\b(unsubscribe|sale|promotion|weekly digest|newsletter)\b/.test(text)) {
+    score -= 45;
+  }
+
+  return score;
+}
+
+function buildBatchSummaryFallback(cleanEmails = []) {
+  const actionableEmails = cleanEmails.filter((email) => email.actionRequired || email.priority === 'high');
+  const focusEmails = (actionableEmails.length ? actionableEmails : cleanEmails).slice(0, 4);
+  const focusSubjects = focusEmails.map((email) => email.subject).filter(Boolean);
+  const topSubjectList = focusSubjects.slice(0, 2).join('; ');
+  const priority = actionableEmails.length ? 'high' : cleanEmails.some((email) => email.priority === 'normal') ? 'medium' : 'low';
+
+  const executiveSummary = actionableEmails.length
+    ? `${actionableEmails.length} urgent email${actionableEmails.length > 1 ? 's need' : ' needs'} attention. Highest-signal items: ${topSubjectList || 'review your top active threads'}.`
+    : `Inbox is stable. Current focus is ${topSubjectList || 'the latest active conversations'}.`;
+
+  const keyUpdates = focusEmails.map((email) => `${email.from}: ${email.subject}`);
+  const criticalActions = focusEmails
+    .filter((email) => email.actionRequired || email.priority === 'high')
+    .map((email) => `Respond to ${email.from} about ${email.subject}`)
+    .slice(0, 4);
+
+  const risks = actionableEmails
+    .slice(0, 3)
+    .map((email) => `A delayed response to ${email.from} on "${email.subject}" could slow progress.`);
+
+  const categoryCounts = cleanEmails.reduce((acc, email) => {
+    const key = email.category || 'other';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const topCategory = Object.entries(categoryCounts).sort((left, right) => right[1] - left[1])[0]?.[0];
+  const insights = [];
+
+  if (topCategory) {
+    insights.push(`Most active lane right now: ${topCategory.replace(/_/g, ' ')}.`);
+  }
+  if (actionableEmails.length) {
+    insights.push(`Action-required traffic is concentrated in ${actionableEmails.length} active thread${actionableEmails.length > 1 ? 's' : ''}.`);
+  } else {
+    insights.push('No high-risk inbox items are crowding the top of the queue.');
+  }
+
+  const recommendations = actionableEmails.length
+    ? actionableEmails.slice(0, 3).map((email) => `Start with ${email.subject} from ${email.from}.`)
+    : ['Continue triaging the newest non-newsletter conversations first.'];
+
+  return {
+    executive_summary: executiveSummary,
+    key_updates: keyUpdates,
+    critical_actions: criticalActions.length ? criticalActions : ['Review your newest active threads and reply where needed.'],
+    risks,
+    insights,
+    recommendations,
+    priority,
+  };
+}
+
+function normalizeBriefingResult(parsed, fallback) {
+  if (!parsed || typeof parsed !== 'object') {
+    return fallback;
+  }
+
+  const priority = normalizePriority(parsed.priority || fallback.priority);
+  const keyUpdates = normalizeList(parsed.key_updates, 5);
+  const criticalActions = normalizeList(parsed.critical_actions, 5);
+  const risks = normalizeList(parsed.risks, 5);
+  const insights = normalizeList(parsed.insights, 5);
+  const recommendations = normalizeList(parsed.recommendations, 5);
+
+  return {
+    executive_summary: isUsefulText(parsed.executive_summary) ? parsed.executive_summary.trim() : fallback.executive_summary,
+    key_updates: keyUpdates.length ? keyUpdates : fallback.key_updates,
+    critical_actions: criticalActions.length ? criticalActions : fallback.critical_actions,
+    risks: risks.length ? risks : fallback.risks,
+    insights: insights.length ? insights : fallback.insights,
+    recommendations: recommendations.length ? recommendations : fallback.recommendations,
+    priority,
+  };
+}
+
 async function requestGroq(messages, overrides = {}) {
   if (!GROQ_API_KEY) return null;
   if (cooldownUntil > Date.now()) return null;
@@ -103,26 +296,45 @@ async function requestGroq(messages, overrides = {}) {
  * FINAL UPGRADE: Deep cleaning and deduplication.
  */
 function getCleanFilteredEmails(emails = []) {
-  const ignoreWords = ["unsubscribe", "sale", "offer", "discount", "joke", "meme", "neighbor crush"];
-  
-  // 1. Remove obvious noise and empty emails
-  const filtered = emails
-    .filter(e => e.subject?.trim() && (e.body?.trim() || e.snippet?.trim()))
-    .filter(e => {
-      const text = (e.subject + ' ' + (e.body || e.snippet || '')).toLowerCase();
-      return !ignoreWords.some(word => text.includes(word));
+  const ignoreWords = ['neighbor crush', 'joke', 'meme'];
+
+  const filtered = emails.filter((email) => {
+    if (!email?.subject?.trim()) return false;
+    if (!(email.body?.trim() || email.snippet?.trim())) return false;
+
+    const text = `${email.subject} ${email.body || email.snippet || ''}`.toLowerCase();
+    return !ignoreWords.some((word) => text.includes(word));
+  });
+
+  const rankedEmails = filtered
+    .map((email) => ({ email, score: scoreBriefingEmail(email) }))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return new Date(right.email.receivedAt || right.email.createdAt || 0).getTime()
+        - new Date(left.email.receivedAt || left.email.createdAt || 0).getTime();
     });
 
-  // 2. Remove duplicate subject lines (Deduplication)
-  const uniqueEmails = Array.from(
-    new Map(filtered.map(e => [e.subject.trim().toLowerCase(), e])).values()
-  );
+  const uniqueEmails = [];
+  const seenSubjects = new Set();
 
-  // 3. Format for AI consumption
-  return uniqueEmails.map(e => ({
-    from: e.senderName || e.sender || 'Unknown',
-    subject: e.subject.trim(),
-    content: truncateForPrompt(e.body || e.snippet || '', 300)
+  for (const { email } of rankedEmails) {
+    const key = String(email.subject || '').trim().toLowerCase();
+    if (!key || seenSubjects.has(key)) {
+      continue;
+    }
+
+    seenSubjects.add(key);
+    uniqueEmails.push(email);
+  }
+
+  return uniqueEmails.slice(0, 20).map((email) => ({
+    from: formatSenderLabel(email.senderName || email.sender || 'Unknown sender'),
+    subject: String(email.subject || '').trim(),
+    content: truncateForPrompt(email.body || email.snippet || '', 300),
+    priority: normalizePriority(email.priority),
+    category: email.category || 'other',
+    actionRequired: Boolean(email.actionRequired),
+    receivedAt: email.receivedAt || email.createdAt || null,
   }));
 }
 
@@ -150,14 +362,7 @@ const summarizeBatchEmails = async (emails = [], userId = 'default') => {
     .map((e, i) => `Email ${i + 1}:\nFrom: ${e.from}\nSubject: ${e.subject}\nContent: ${e.content}`)
     .join('\n\n---\n\n');
 
-  const fallback = {
-    executive_summary: `Briefing: Analyzing ${cleanEmails.length} professional communications. High recruiter demand detected.`,
-    key_updates: cleanEmails.slice(0, 2).map(e => `Progress regarding ${e.subject}`),
-    critical_actions: cleanEmails.slice(0, 2).map(e => `Address inquiry from ${e.from}`),
-    risks: [],
-    insights: ['Recruitment volume is high.'],
-    priority: 'normal'
-  };
+  const fallback = buildBatchSummaryFallback(cleanEmails);
 
   if (!GROQ_API_KEY) return fallback;
 
@@ -242,8 +447,9 @@ Return ONLY strict JSON.`
     const json = extractJsonBlock(content || '', 'object');
     if (json) {
       const parsed = JSON.parse(json);
-      batchSummaryCache.set(cacheKey, { content: parsed, expiry: Date.now() + 5 * 60 * 1000 });
-      return parsed;
+      const normalized = normalizeBriefingResult(parsed, fallback);
+      batchSummaryCache.set(cacheKey, { content: normalized, expiry: Date.now() + 5 * 60 * 1000 });
+      return normalized;
     }
     return fallback;
   } catch (err) {
@@ -296,6 +502,27 @@ Rules:
 // ─── Legacy Wrappers ───────────────────────────────────────────────────────
 
 const summarizeEmail = async (content, subject = '') => {
+  const parsedEmail = parseEmailContent(content);
+  const intelligence = analyzeEmailIntelligence({
+    subject,
+    body: parsedEmail.body,
+    snippet: truncateForPrompt(parsedEmail.body, 240),
+    sender: parsedEmail.sender,
+  });
+  const fallbackSummary = {
+    priority: intelligence.priority.toUpperCase(),
+    company: inferCompanyLabel(parsedEmail.sender, subject),
+    role: subject || 'Email update',
+    action_url: extractFirstUrl(content),
+    deadline: extractDeadlineText(`${subject}\n${parsedEmail.body}`) || 'No specific deadline mentioned',
+    formatted_summary: [
+      formatRuleSummary(intelligence.summary),
+      !intelligence.actionRequired && intelligence.priority !== 'high'
+        ? 'Next step: Keep this item visible and revisit if a reply is needed.'
+        : null,
+    ].filter(Boolean).join('\n'),
+  };
+
   const prompt = `Analyze the following email and generate a structured, action-oriented briefing like a real Chief of Staff.
 
 Focus on:
@@ -339,7 +566,7 @@ Return ONLY a valid JSON object:
   "priority": "HIGH" | "MEDIUM" | "LOW",
   "company": "...",
   "role": "...",
-  "action_url": "...",
+  "action_url": "Extract the primary CTA URL if any (e.g., Apply, Confirm, Join, Register). IGNORE image or tracking links.",
   "deadline": "...",
   "formatted_summary": "..."
 }`;
@@ -350,20 +577,32 @@ Return ONLY a valid JSON object:
       { role: 'user', content: `${prompt}\n\nSubject: ${subject}\n\nContent: ${content}` }
     ], { temperature: 0.1 });
 
-    // Try to extract JSON, but if it fails or returns plain text, wrap it.
     const json = extractJsonBlock(result || '', 'object');
     if (json) {
-      return json; // Return the JSON string itself to be stored in the summary field
+      try {
+        const aiSummary = JSON.parse(json);
+        return JSON.stringify({
+          ...fallbackSummary,
+          ...aiSummary,
+          priority: String(aiSummary.priority || fallbackSummary.priority).toUpperCase(),
+          company: isUsefulText(aiSummary.company) ? aiSummary.company : fallbackSummary.company,
+          role: isUsefulText(aiSummary.role) ? aiSummary.role : fallbackSummary.role,
+          action_url: isUsefulText(aiSummary.action_url) ? aiSummary.action_url : fallbackSummary.action_url,
+          deadline: isUsefulText(aiSummary.deadline) ? aiSummary.deadline : fallbackSummary.deadline,
+          formatted_summary: isUsefulText(aiSummary.formatted_summary) ? aiSummary.formatted_summary : fallbackSummary.formatted_summary,
+        });
+      } catch (error) {
+        return JSON.stringify(fallbackSummary);
+      }
     }
 
-    // Fallback if AI didn't return JSON
     return JSON.stringify({
-      priority: "MEDIUM",
-      formatted_summary: result || 'No summary available.'
+      ...fallbackSummary,
+      formatted_summary: isUsefulText(result) ? result : fallbackSummary.formatted_summary,
     });
   } catch (error) {
     console.error('[XAI] Summarize error:', error.message);
-    return 'No summary available.';
+    return JSON.stringify(fallbackSummary);
   }
 };
 

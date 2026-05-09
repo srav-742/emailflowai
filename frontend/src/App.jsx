@@ -84,7 +84,7 @@ function App() {
           <Route path="finance" element={<ErrorBoundary name="Finance"><EmailList title="Finance queue" description="Invoices, receipts, budgets, and payment approvals." filter={{ category: 'finance' }} /></ErrorBoundary>} />
           <Route path="developer" element={<ErrorBoundary name="Developer"><EmailList title="Developer queue" description="Deployments, pull requests, outages, and engineering updates." filter={{ category: 'developer' }} /></ErrorBoundary>} />
           <Route path="meetings" element={<ErrorBoundary name="Meetings"><CalendarPage /></ErrorBoundary>} />
-          <Route path="newsletter" element={<ErrorBoundary name="Newsletter"><EmailList title="Newsletters and promos" description="Low-noise reads that can wait until later." filter={{ category: 'newsletter' }} /></ErrorBoundary>} />
+          <Route path="newsletter" element={<Navigate to="/newsletters" replace />} />
           <Route path="social" element={<ErrorBoundary name="Social"><EmailList title="Social and community" description="Community updates, forums, and social notifications." filter={{ category: 'social' }} /></ErrorBoundary>} />
           
           {/* Smart Inbox Tabs */}

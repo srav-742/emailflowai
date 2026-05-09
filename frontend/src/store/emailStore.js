@@ -11,7 +11,13 @@ export const useEmailStore = create((set) => ({
   loading: false,
   error: null,
 
-  setEmails: (emails) => set({ emails }),
+  setEmails: (newEmails) => set((state) => {
+    const merged = new Map();
+    // Maintain existing emails or prefer new ones? 
+    // Usually new ones have updated stats/summaries.
+    newEmails.forEach((email) => merged.set(email.id, email));
+    return { emails: Array.from(merged.values()) };
+  }),
 
   addEmail: (email) => set((state) => {
     // Avoid duplicates if SSE and polling overlap

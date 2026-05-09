@@ -94,20 +94,41 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
 
   const showDetails = expanded || !compact;
   const showControls = (!compact || expanded) && !isThreaded;
+  const isWeakSummary = (value = '') => {
+    const text = String(value || '').trim();
+    return !text || /no summary available/i.test(text);
+  };
+
+  const isValidActionUrl = (url) => {
+    if (!url) return false;
+    const ignorePatterns = [/sendgrid\.net/i, /doubleclick\.net/i, /pixel/i, /track/i, /\.png/i, /\.jpg/i, /\.gif/i];
+    return !ignorePatterns.some(p => p.test(url));
+  };
   
   // Parse structured summary if available
-  let summaryText = email.summary || email.snippet || 'No summary available yet. Refresh summary to analyze this email.';
+  let summaryText = !isWeakSummary(email.summary)
+    ? email.summary
+    : (email.snippet || 'No summary available yet. Refresh summary to analyze this email.');
   let summaryMeta = null;
   
   try {
     if (email.summary && (email.summary.startsWith('{') || email.summary.startsWith('['))) {
       const parsed = JSON.parse(email.summary);
-      if (parsed.formatted_summary) {
-        summaryText = parsed.formatted_summary;
-        summaryMeta = parsed;
+      const structuredSummary = [
+        parsed.formatted_summary,
+        parsed.summary,
+        parsed.executive_summary,
+        parsed.brief,
+      ].find((value) => typeof value === 'string' && !isWeakSummary(value));
+
+      summaryMeta = parsed;
+      if (structuredSummary) {
+        summaryText = structuredSummary;
+      } else if (email.snippet) {
+        summaryText = email.snippet;
       }
     }
-  } catch (e) {
+  } catch {
     // Fallback to plain text
   }
 
@@ -169,7 +190,7 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
           lineHeight: '1.5'
         }}>{summaryText}</p>
         
-        {summaryMeta?.action_url && (
+        {isValidActionUrl(summaryMeta?.action_url) && (
           <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
             <a 
               href={summaryMeta.action_url} 

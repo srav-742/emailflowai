@@ -9,7 +9,6 @@ const shellNavItems = [
   { path: '/finance', label: 'Finance', kicker: 'Payments and receipts' },
   { path: '/developer', label: 'Developer', kicker: 'Deploys and incidents' },
   { path: '/meetings', label: 'Meetings', kicker: 'Calendar and agenda' },
-  { path: '/newsletter', label: 'Newsletters', kicker: 'Read later' },
   { path: '/social', label: 'Social', kicker: 'Community updates' },
   { path: '/focus', label: 'Focus Today', kicker: 'Immediate action' },
   { path: '/read-later', label: 'Read Later', kicker: 'When you have time' },
@@ -17,6 +16,7 @@ const shellNavItems = [
   { path: '/waiting', label: 'Waiting for Reply', kicker: 'Expectations' },
   { path: '/settings/digest', label: 'Digest Settings', kicker: 'Personalization' },
   { path: '/settings/accounts', label: 'Gmail Accounts', kicker: 'Multi-account setup' },
+  { path: '/pricing', label: 'Upgrade Plan', kicker: 'Unlock full AI power' },
 ];
 
 const pageTitles = {
@@ -25,7 +25,6 @@ const pageTitles = {
   '/finance': 'Finance queue',
   '/developer': 'Developer queue',
   '/meetings': 'Meetings and calendar',
-  '/newsletter': 'Newsletters and promos',
   '/social': 'Social and community',
   '/focus': 'Focus Today',
   '/read-later': 'Read Later',
@@ -33,6 +32,7 @@ const pageTitles = {
   '/waiting': 'Waiting for Reply',
   '/settings/digest': 'Morning Brief Settings',
   '/settings/accounts': 'Account Operations',
+  '/pricing': 'Premium Intelligence Plans',
 };
 
 const pageDescriptions = {
@@ -41,7 +41,6 @@ const pageDescriptions = {
   '/finance': 'Invoices, receipts, payment asks, and approvals gathered into one lane.',
   '/developer': 'Deployments, incidents, pull requests, and engineering notifications.',
   '/meetings': 'Schedules, invites, agendas, and follow-up threads with less clutter.',
-  '/newsletter': 'A calm read-later stack for promos, product updates, and newsletters.',
   '/social': 'Community notifications and lower-priority social traffic in one place.',
   '/focus': 'High-priority emails identified by AI as needing immediate focus.',
   '/read-later': 'A collection of interesting content and threads you saved for later.',
@@ -49,6 +48,7 @@ const pageDescriptions = {
   '/waiting': 'Threads where you sent a message and are still waiting for a response.',
   '/settings/digest': 'Customize your daily AI-powered intelligence summary.',
   '/settings/accounts': 'Manage multiple Gmail connections, sync settings, and UI identities.',
+  '/pricing': 'Choose the plan that fits your professional workflow and unlock unlimited AI depth.',
 };
 
 const Layout = () => {

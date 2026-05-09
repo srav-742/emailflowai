@@ -30,7 +30,6 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [processingAI, setProcessingAI] = useState(false);
-  const [trainingStyle, setTrainingStyle] = useState(false);
   const [notice, setNotice] = useState(null);
   const [inboxSummary, setInboxSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -39,15 +38,20 @@ const Dashboard = () => {
   const currentStep = useMemo(() => {
     if (!user?.hasGmailAccess) return 1;
     if (emails.length === 0) return 2;
-    if (!user?.style?.ready) return 3;
-    return 4;
-  }, [user?.hasGmailAccess, emails.length, user?.style?.ready]);
+    return 3;
+  }, [user?.hasGmailAccess, emails.length]);
 
   const fetchEmails = useCallback(async () => {
     try {
       const response = await emailAPI.getEmails({ limit: 50 });
       const data = response.data || {};
-      const nextEmails = sortByNewest(data.emails || []);
+      const rawEmails = data.emails || [];
+      
+      // Deduplicate
+      const merged = new Map();
+      rawEmails.forEach(e => merged.set(e.id, e));
+      const nextEmails = sortByNewest(Array.from(merged.values()));
+      
       setEmails(nextEmails);
       return nextEmails;
     } catch (error) {
@@ -142,36 +146,37 @@ const Dashboard = () => {
       await emailAPI.aiProcessAll();
       await refreshWorkspace();
       setNotice({ tone: 'ok', text: 'Intelligence scan complete.' });
-    } catch (error) {
+    } catch {
       setNotice({ tone: 'warn', text: 'AI scan failed.' });
     } finally {
       setProcessingAI(false);
     }
   };
 
-  const handleSyncEmails = async () => {
+  const handleSyncEmails = async (e) => {
     try {
       setSyncing(true);
       await emailAPI.syncEmails();
       await refreshWorkspace();
       setNotice({ tone: 'ok', text: 'Inbox synced successfully.' });
-    } catch (error) {
+      
+      // Temporary success state on the button if it still exists
+      if (e?.target) {
+        const btn = e.target;
+        const originalText = btn.innerText;
+        btn.innerText = '✅ Synced successfully';
+        btn.style.background = '#10b981';
+        setTimeout(() => {
+          if (btn) {
+            btn.innerText = originalText;
+            btn.style.background = '';
+          }
+        }, 4000);
+      }
+    } catch {
       setNotice({ tone: 'warn', text: 'Sync failed.' });
     } finally {
       setSyncing(false);
-    }
-  };
-
-  const handleTrainStyle = async () => {
-    try {
-      setTrainingStyle(true);
-      const response = await aiAPI.trainStyle();
-      await refreshProfile();
-      setNotice({ tone: response.data.ready ? 'ok' : 'warn', text: response.data.message });
-    } catch (error) {
-      setNotice({ tone: 'warn', text: 'Training failed.' });
-    } finally {
-      setTrainingStyle(false);
     }
   };
 
@@ -234,13 +239,12 @@ const Dashboard = () => {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         
-        {currentStep < 4 && (
+        {currentStep < 3 && (
           <div className="surface-card" style={{ border: '1px solid var(--accent)', background: 'rgba(124,58,237,0.05)' }}>
             <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Complete Your Setup</h2>
             <div style={{ display: 'flex', gap: '1rem' }}>
                {currentStep === 1 && <button className="button button-primary" onClick={() => navigate('/auth/gmail-connect')}>Connect Gmail</button>}
                {currentStep === 2 && <button className="button button-primary" onClick={handleSyncEmails} disabled={syncing}>Sync Inbox</button>}
-               {currentStep === 3 && <button className="button button-primary" onClick={handleTrainStyle} disabled={trainingStyle}>Train AI Voice</button>}
             </div>
           </div>
         )}

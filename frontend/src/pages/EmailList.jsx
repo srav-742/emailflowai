@@ -23,7 +23,7 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(true);
-  const [activeTab, setActiveTab] = useState('focus_today');
+  const [activeTab, setActiveTab] = useState(filter.category || 'focus_today');
   const [liveMessage, setLiveMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'threads'
@@ -115,7 +115,22 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
       setLoading(true);
       const response = await emailAPI.syncEmails();
       setSyncMessage(response.data.warning || response.data.message || 'Inbox synced successfully.');
-      await fetchEmails();
+      
+      // Update button feedback
+      const originalText = 'Sync now';
+      const btn = document.querySelector('.toolbar .button-secondary');
+      if (btn) {
+        btn.innerText = 'Synced successfully';
+        btn.style.background = '#10b981';
+        btn.style.borderColor = '#10b981';
+        setTimeout(() => {
+          btn.innerText = originalText;
+          btn.style.background = '';
+          btn.style.borderColor = '';
+        }, 3000);
+      }
+
+      await fetchEmails(true);
     } catch (error) {
       console.error('Failed to sync emails:', error);
       setSyncMessage(error.response?.data?.error || 'Unable to sync Gmail right now. Your saved inbox is still available.');

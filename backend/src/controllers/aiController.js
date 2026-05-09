@@ -1,6 +1,5 @@
 const prisma = require('../config/database');
 const { getMorningBrief } = require('../services/briefService');
-const { learnUserStyle } = require('../services/styleService');
 const { getAnalytics } = require('../services/analyticsService');
 const { summarizeBatchEmails } = require('../utils/xai');
 
@@ -15,18 +14,11 @@ const morningBrief = async (req, res) => {
 };
 
 const trainStyle = async (req, res) => {
-  try {
-    const result = await learnUserStyle(req.user.id);
-    res.json({
-      message: result.message,
-      ready: result.ready,
-      style: result.style,
-      sampleCount: result.sampleCount,
-    });
-  } catch (error) {
-    console.error('Style training error:', error);
-    res.status(500).json({ error: 'Failed to learn writing style' });
-  }
+  return res.json({
+    message: 'AI voice training has been removed from EmailFlow AI.',
+    ready: true,
+    removed: true,
+  });
 };
 
 const getAnalyticsSummary = async (req, res) => {

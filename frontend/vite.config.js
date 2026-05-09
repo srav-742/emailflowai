@@ -13,7 +13,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+      'Cross-Origin-Opener-Policy': 'unsafe-none',
     },
     proxy: {
       '/api': {

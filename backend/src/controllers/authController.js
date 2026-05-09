@@ -28,8 +28,12 @@ function isDatabaseUnavailableError(error) {
   const code = String(error?.code || '');
 
   return (
+    code === 'P1010' ||
     code === 'P1001' ||
     code === 'P1002' ||
+    message.includes('denied access on the database') ||
+    message.includes('was denied access') ||
+    message.includes('permission denied') ||
     message.includes("Can't reach database server") ||
     message.includes('database server') ||
     message.includes('ECONNREFUSED') ||
@@ -201,7 +205,7 @@ const firebaseGoogleLogin = async (req, res) => {
   } catch (error) {
     console.error('Auth Error:', error);
     if (!res.headersSent) {
-      return sendAuthError(res, error, error.message || 'Authentication failed');
+      return sendAuthError(res, error, 'Authentication failed');
     }
   }
 };

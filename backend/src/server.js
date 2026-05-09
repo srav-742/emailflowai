@@ -244,6 +244,36 @@ setInterval(() => {
   digestService.checkAndTriggerDigests().catch(console.error);
 }, 15 * 60 * 1000);
 
+app.get('/api/debug/db', async (req, res) => {
+  const dbConfig = require('./config/database');
+  const results = {
+    env: {
+      has_db_url: !!process.env.DATABASE_URL,
+      db_url_length: process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0,
+      node_env: process.env.NODE_ENV,
+      node_version: process.version,
+    },
+    connection: 'unknown',
+    error: null,
+  };
+
+  try {
+    const start = Date.now();
+    await dbConfig.$queryRaw`SELECT 1`;
+    results.connection = 'success';
+    results.latency = `${Date.now() - start}ms`;
+  } catch (err) {
+    results.connection = 'failed';
+    results.error = {
+      message: err.message,
+      code: err.code,
+      meta: err.meta,
+    };
+  }
+
+  res.json(results);
+});
+
 app.get('/api/health', async (req, res) => {
   let database = 'disconnected';
   let redisStatus = 'disconnected';

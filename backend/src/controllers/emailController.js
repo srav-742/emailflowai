@@ -475,14 +475,18 @@ const syncEmails = async (req, res) => {
       });
 
       if (user) {
-        emitEmailNotifications(io, user, result.newEmails);
-      } else {
+        if (io) {
+          emitEmailNotifications(io, user, result.newEmails);
+        }
+      } else if (io) {
         io.to(getUserSocketRoom(req.user.id)).emit('new-emails', result.newEmails);
       }
 
       try {
         const summary = await summarizeBatchEmails(result.emails, req.user.id);
-        io.to(getUserSocketRoom(req.user.id)).emit('inbox-summary', summary);
+        if (io) {
+          io.to(getUserSocketRoom(req.user.id)).emit('inbox-summary', summary);
+        }
       } catch (err) {
         console.error('Failed to auto-update batch summary during sync:', err);
       }

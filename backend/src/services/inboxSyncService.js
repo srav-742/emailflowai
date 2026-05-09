@@ -69,20 +69,68 @@ function findAttachments(payload, attachments = []) {
   return attachments;
 }
 
-function ensureGmailConnection(user) {
-  if (!user?.accessToken && !user?.refreshToken) {
-    const error = new Error('Gmail access token not found. Please reconnect Gmail.');
-    error.statusCode = 401;
-    throw error;
+async function ensureGmailConnection(userId, accountId = null, user = null) {
+  const resolvedUser = user || await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      accessToken: true,
+      refreshToken: true,
+    },
+  });
+
+  if (resolvedUser?.accessToken || resolvedUser?.refreshToken) {
+    return resolvedUser;
   }
+
+  if (accountId) {
+    const account = await prisma.emailAccount.findUnique({
+      where: { id: accountId },
+      select: {
+        id: true,
+        userId: true,
+        accessToken: true,
+        refreshToken: true,
+      },
+    });
+
+    if (account?.userId === userId && (account.accessToken || account.refreshToken)) {
+      return resolvedUser;
+    }
+  } else {
+    const [connectedAccount, oauthToken] = await Promise.all([
+      prisma.emailAccount.findFirst({
+        where: {
+          userId,
+          OR: [
+            { accessToken: { not: null } },
+            { refreshToken: { not: null } },
+          ],
+        },
+        select: { id: true },
+      }),
+      prisma.oAuthToken.findFirst({
+        where: { userId },
+        select: { id: true },
+      }),
+    ]);
+
+    if (connectedAccount || oauthToken) {
+      return resolvedUser;
+    }
+  }
+
+  const error = new Error('Gmail access token not found. Please reconnect Gmail.');
+  error.statusCode = 401;
+  throw error;
 }
 
-async function getAuthenticatedUser(userId) {
+async function getAuthenticatedUser(userId, accountId = null) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
   });
 
-  ensureGmailConnection(user);
+  await ensureGmailConnection(userId, accountId, user);
   return user;
 }
 
@@ -374,12 +422,13 @@ async function persistEmail(userId, payload, existingEmail) {
 async function syncInboxInternal(userId, maxResults = 35, options = {}) {
   const { returnMeta = false, accountId = null } = options;
   console.log(`[Sync] Starting sync for user ${userId}, account: ${accountId || 'primary'}`);
-  // Validates Gmail is connected; the token check happens inside getAuthenticatedGmailClient.
-  await getAuthenticatedUser(userId);
-  // Build the Gmail client with a guaranteed-fresh access token.
-  const gmail = await getAuthenticatedGmailClient(userId, accountId);
 
   try {
+    // Validate Gmail is connected and build a fresh Gmail client inside the same
+    // recovery block so transient token/provider failures can fall back cleanly.
+    await getAuthenticatedUser(userId, accountId);
+    const gmail = await getAuthenticatedGmailClient(userId, accountId);
+
     const response = await gmail.users.messages.list({
       userId: 'me',
       maxResults,
@@ -441,8 +490,21 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
       })));
       
       batch.forEach((p, idx) => {
-        p.category = categorizationResults[idx]?.category || 'other';
-        p.aiConfidence = categorizationResults[idx]?.confidence || 0;
+        const aiCategory = categorizationResults[idx]?.category || 'other';
+        const aiConfidence = categorizationResults[idx]?.confidence || 0;
+        
+        // If AI is unsure or returns a generic category, and we already have a specific rule-based one, keep the rule-based one.
+        const ruleCategory = p.category;
+        const isGenericAI = ['other', 'read_later'].includes(aiCategory);
+        const isSpecificRule = ['finance', 'developer', 'social', 'meetings'].includes(ruleCategory);
+        
+        if (isGenericAI && isSpecificRule && aiConfidence < 0.8) {
+          // Keep ruleCategory (already in p.category)
+        } else {
+          p.category = aiCategory;
+        }
+        
+        p.aiConfidence = aiConfidence;
         p.categorizedAt = new Date();
       });
     }

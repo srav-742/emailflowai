@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "installCommand": "npm install",
-  "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -16,27 +16,5 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Cross-Origin-Opener-Policy",
-          "value": "unsafe-none"
-        }
-      ]
-    }
-  ],
-  "build": {
-    "env": {
-      "VITE_API_URL": "https://emailflowai.onrender.com/api",
-      "VITE_SOCKET_URL": "https://emailflowai.onrender.com"
-    }
-  },
-  "env": {
-    "VITE_API_URL": "https://emailflowai.onrender.com/api",
-    "VITE_SOCKET_URL": "https://emailflowai.onrender.com"
-  }
+  ]
 }
-

@@ -2,7 +2,8 @@
   "version": 2,
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "echo 'skip'",
+  "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -16,11 +17,5 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "build": {
-    "env": {
-      "VITE_API_URL": "https://emailflowai.onrender.com/api",
-      "VITE_SOCKET_URL": "https://emailflowai.onrender.com"
-    }
-  }
+  ]
 }

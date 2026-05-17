@@ -1,19 +1,16 @@
 const prisma = require('../config/database');
 const { getCalendarClient } = require('../lib/google/getAuthClient');
+const { createReconnectError, resolveGoogleAccountEmail } = require('./googleConnectionService');
 
 /**
  * Sync Google Calendar events for the next 7 days.
  */
 async function syncCalendar(userId) {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { email: true }
-    });
+    const email = await resolveGoogleAccountEmail(userId);
+    if (!email) throw createReconnectError('No connected Gmail account found. Please reconnect Gmail.');
 
-    if (!user?.email) throw new Error('User email not found for calendar sync.');
-
-    const calendar = await getCalendarClient(userId, user.email);
+    const calendar = await getCalendarClient(userId, email);
     
     
     const timeMin = new Date().toISOString();
@@ -79,21 +76,18 @@ async function syncCalendar(userId) {
  */
 async function addReminder(userId, actionItemId) {
   try {
-    const [actionItem, user] = await Promise.all([
+    const [actionItem, email] = await Promise.all([
       prisma.actionItem.findUnique({
         where: { id: actionItemId }
       }),
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { email: true }
-      })
+      resolveGoogleAccountEmail(userId)
     ]);
 
     if (!actionItem) throw new Error('Action item not found.');
     if (!actionItem.dueDate) throw new Error('Action item has no due date.');
-    if (!user?.email) throw new Error('User email not found.');
+    if (!email) throw createReconnectError('No connected Gmail account found. Please reconnect Gmail.');
 
-    const calendar = await getCalendarClient(userId, user.email);
+    const calendar = await getCalendarClient(userId, email);
 
     const event = {
       summary: `Task: ${actionItem.title}`,

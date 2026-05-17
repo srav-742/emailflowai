@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
 
 /* ═══════════════════════════════════════════════════════════════
    EMAILFLOW AI — DEEP SPACE DARK THEME
@@ -1667,4 +1668,226 @@ code { font-family: 'Plus Jakarta Sans', monospace; }
 
 .task-item:hover h4 {
   color: var(--accent-light);
+}
+
+/* --------------------------------------------------------------
+   2026 Theme Refresh + Gmail Reconnect UX
+   -------------------------------------------------------------- */
+
+:root {
+  --bg: #07141a;
+  --bg-deep: #031017;
+  --bg-mid: #0c222a;
+  --panel: rgba(9, 23, 30, 0.76);
+  --panel-strong: rgba(10, 27, 35, 0.94);
+  --panel-soft: rgba(20, 184, 166, 0.08);
+  --panel-hover: rgba(14, 33, 43, 0.9);
+  --border: rgba(45, 212, 191, 0.18);
+  --border-strong: rgba(45, 212, 191, 0.32);
+  --border-glow: rgba(251, 191, 36, 0.28);
+  --text: #eefbf8;
+  --text-dim: #c9e5e1;
+  --muted: #76a49f;
+  --muted-strong: #9ec8c2;
+  --accent: #0f766e;
+  --accent-light: #5eead4;
+  --accent-glow: rgba(15, 118, 110, 0.35);
+  --cyan: #0ea5e9;
+  --cyan-light: #7dd3fc;
+  --cyan-glow: rgba(14, 165, 233, 0.28);
+  --indigo: #14b8a6;
+  --pink: #f97316;
+  --astro-violet: #14b8a6;
+  --astro-indigo: #0ea5e9;
+  --astro-cyan: #22d3ee;
+  --astro-pink: #f59e0b;
+  --highlight: #f59e0b;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.54), 0 4px 16px rgba(20, 184, 166, 0.08);
+  --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(20, 184, 166, 0.06);
+  --glow-violet: 0 0 40px rgba(15, 118, 110, 0.24);
+  --glow-cyan: 0 0 40px rgba(14, 165, 233, 0.22);
+}
+
+body {
+  font-family: 'Manrope', system-ui, sans-serif;
+  background: linear-gradient(180deg, #031017 0%, #07141a 50%, #0b1d24 100%);
+}
+
+body::before {
+  background:
+    radial-gradient(ellipse 72% 58% at 12% -6%, rgba(20, 184, 166, 0.2) 0%, transparent 52%),
+    radial-gradient(ellipse 54% 44% at 92% 12%, rgba(245, 158, 11, 0.14) 0%, transparent 48%),
+    radial-gradient(ellipse 78% 64% at 78% 100%, rgba(14, 165, 233, 0.14) 0%, transparent 56%),
+    radial-gradient(ellipse 46% 38% at 4% 84%, rgba(34, 211, 238, 0.08) 0%, transparent 42%),
+    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(3, 6, 18, 0) 0%, #031017 70%);
+}
+
+body::after {
+  background-image:
+    radial-gradient(1px 1px at 20% 35%, rgba(255, 255, 255, 0.14) 0%, transparent 100%),
+    radial-gradient(1px 1px at 75% 15%, rgba(255, 255, 255, 0.09) 0%, transparent 100%),
+    radial-gradient(1px 1px at 55% 70%, rgba(255, 255, 255, 0.11) 0%, transparent 100%),
+    radial-gradient(1px 1px at 10% 80%, rgba(255, 255, 255, 0.07) 0%, transparent 100%),
+    radial-gradient(1px 1px at 90% 60%, rgba(255, 255, 255, 0.09) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 40% 20%, rgba(94, 234, 212, 0.24) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 65% 85%, rgba(125, 211, 252, 0.22) 0%, transparent 100%);
+}
+
+code {
+  font-family: 'Space Grotesk', monospace;
+}
+
+.eyebrow {
+  background: linear-gradient(90deg, var(--highlight), var(--accent-light), var(--cyan-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.button-primary {
+  background: linear-gradient(135deg, #0f766e, #0ea5e9);
+  border-color: rgba(94, 234, 212, 0.38);
+  box-shadow: 0 4px 20px rgba(15, 118, 110, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.button-primary:hover {
+  box-shadow: 0 8px 32px rgba(14, 165, 233, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.button-secondary {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: rgba(14, 165, 233, 0.22);
+  color: var(--cyan-light);
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.08);
+}
+
+.button-secondary:hover {
+  background: rgba(14, 165, 233, 0.18);
+  border-color: rgba(14, 165, 233, 0.38);
+  box-shadow: 0 4px 20px rgba(14, 165, 233, 0.18);
+}
+
+.auth-hero,
+.auth-card {
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.08) 0%, rgba(14, 165, 233, 0.04) 70%, rgba(245, 158, 11, 0.03) 100%),
+    rgba(7, 17, 26, 0.9);
+}
+
+.auth-hero {
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.14) 0%, rgba(14, 165, 233, 0.08) 56%, rgba(245, 158, 11, 0.06) 100%),
+    rgba(7, 16, 24, 0.92);
+}
+
+.auth-hero-premium {
+  background:
+    radial-gradient(ellipse 80% 60% at 18% 0%, rgba(20, 184, 166, 0.18) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 50% at 82% 88%, rgba(245, 158, 11, 0.12) 0%, transparent 45%),
+    rgba(6, 15, 23, 0.95);
+}
+
+.auth-card-spotlight {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(20, 184, 166, 0.12) 0%, transparent 60%),
+    rgba(6, 16, 24, 0.96);
+}
+
+.auth-hero-copy h1,
+.hero-score-card strong,
+.gmail-reconnect-copy h3 {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.auth-hero-copy h1 {
+  background: linear-gradient(135deg, #fff 18%, #fef3c7 42%, var(--accent-light) 72%, var(--cyan-light) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.hero-glow-left {
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.45), transparent 70%);
+}
+
+.hero-glow-right {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.28), transparent 70%);
+}
+
+.hero-score-card strong {
+  background: linear-gradient(135deg, #fff, #fde68a, var(--accent-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.gmail-reconnect-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.25rem 1.4rem;
+  margin-bottom: 1.25rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(249, 115, 22, 0.26);
+  background:
+    linear-gradient(135deg, rgba(249, 115, 22, 0.12), rgba(14, 165, 233, 0.08)),
+    var(--panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.gmail-reconnect-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.gmail-reconnect-copy h3 {
+  margin: 0;
+  color: #fff7ed;
+}
+
+.gmail-reconnect-copy p {
+  margin: 0;
+  color: #fed7aa;
+}
+
+.callback-step-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.callback-step {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(45, 212, 191, 0.16);
+  background: rgba(20, 184, 166, 0.05);
+}
+
+.callback-step strong {
+  color: var(--text);
+}
+
+.callback-step span {
+  color: var(--muted-strong);
+  font-size: 0.92rem;
+}
+
+.callback-step-active {
+  border-color: rgba(14, 165, 233, 0.32);
+  background: rgba(14, 165, 233, 0.1);
+}
+
+.callback-step-complete {
+  border-color: rgba(16, 185, 129, 0.26);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.callback-step-warning {
+  border-color: rgba(249, 115, 22, 0.32);
+  background: rgba(249, 115, 22, 0.1);
+}
+
+@media (max-width: 640px) {
+  .gmail-reconnect-banner {
+    grid-template-columns: 1fr;
+  }
 }

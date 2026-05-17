@@ -10,6 +10,7 @@ const {
 } = require('../controllers/authController');
 const { getGmailAuthUrl, getGmailTokens, getGmailOAuthConfig } = require('../utils/gmailOAuth');
 const { authenticate } = require('../middleware/auth');
+const { asyncHandler } = require('../utils/asyncHandler');
 
 const router = express.Router();
 
@@ -45,7 +46,7 @@ async function handleGmailCallback(req, res) {
   }
 }
 
-router.post('/firebase-login', firebaseGoogleLogin);
+router.post('/firebase-login', asyncHandler(firebaseGoogleLogin));
 
 router.get('/gmail/url', authenticate, (req, res) => {
   res.json(buildGmailAuthPayload(req.user.id));
@@ -55,15 +56,15 @@ router.get('/google/url', authenticate, (req, res) => {
   res.json(buildGmailAuthPayload(req.user.id));
 });
 
-router.get('/gmail/callback', handleGmailCallback);
-router.get('/google/callback', handleGmailCallback);
+router.get('/gmail/callback', asyncHandler(handleGmailCallback));
+router.get('/google/callback', asyncHandler(handleGmailCallback));
 
-router.post('/gmail/connect', authenticate, saveGmailTokens);
-router.get('/profile', authenticate, getProfile);
-router.post('/logout', authenticate, logout);
+router.post('/gmail/connect', authenticate, asyncHandler(saveGmailTokens));
+router.get('/profile', authenticate, asyncHandler(getProfile));
+router.post('/logout', authenticate, asyncHandler(logout));
 
 // Outlook Integration
-router.get('/outlook', outlookAuth);
-router.get('/outlook/callback', outlookCallback);
+router.get('/outlook', asyncHandler(outlookAuth));
+router.get('/outlook/callback', asyncHandler(outlookCallback));
 
 module.exports = router;

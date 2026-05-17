@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
 }
 
@@ -8,62 +8,64 @@ datasource db {
 }
 
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  name             String?
-  plan             String    @default("free")
-  profileImage     String?   @map("profile_image")
-  oauthProvider    String?   @map("oauth_provider")
-  firebaseUid      String?   @map("firebase_uid")
-  stripeCustomerId String?   @map("stripe_customer_id")
-  accessToken      String?   @db.Text @map("access_token")
-  refreshToken     String?   @db.Text @map("refresh_token")
-  tokenExpiry      DateTime? @map("token_expiry")
-  gmailConnectedAt DateTime? @map("gmail_connected_at")
-  lastLogin        DateTime? @map("last_login")
-  lastSyncAt       DateTime? @map("last_sync_at")
-  style            Json?
-  importantContacts String[] @default([]) @map("important_contacts")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-
-  emails           Email[]
-  threads          Thread[]
-  aiLogs           AILog[]
-  actionItems      ActionItem[]
-  aiTraining       AITraining[]
-  emailAccounts    EmailAccount[]
-  stats            UserStats?
-  followUps        FollowUp[]
-  digests          DailyDigest[]
-  digestPreference DigestPreference?
-  subscription     Subscription?
-  analyticsEvents  AnalyticsEvent[]
-  analyticsDaily   AnalyticsDaily[]
-  calendarEvents   CalendarEvent[]
-  oauthTokens      OAuthToken[]
-  clientErrorLogs  ClientErrorLog[]
-  styleProfile     StyleProfile?
+  id                String             @id @default(uuid())
+  email             String             @unique
+  name              String?
+  plan              String             @default("free")
+  profileImage      String?            @map("profile_image")
+  oauthProvider     String?            @map("oauth_provider")
+  firebaseUid       String?            @map("firebase_uid")
+  stripeCustomerId  String?            @map("stripe_customer_id")
+  accessToken       String?            @map("access_token")
+  refreshToken      String?            @map("refresh_token")
+  tokenExpiry       DateTime?          @map("token_expiry")
+  gmailConnectedAt  DateTime?          @map("gmail_connected_at")
+  lastLogin         DateTime?          @map("last_login")
+  lastSyncAt        DateTime?          @map("last_sync_at")
+  style             Json?
+  importantContacts String[]           @default([]) @map("important_contacts")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  actionItems       ActionItem[]
+  aiLogs            AILog[]
+  aiTraining        AITraining[]
+  analyticsDaily    AnalyticsDaily[]
+  analyticsEvents   AnalyticsEvent[]
+  calendarEvents    CalendarEvent[]
+  clientErrorLogs   ClientErrorLog[]
+  digests           DailyDigest[]
+  digestPreference  DigestPreference?
+  emailAccounts     EmailAccount[]
+  emails            Email[]
+  followUps         FollowUp[]
+  oauthTokens       OAuthToken[]
   pushSubscriptions PushSubscription[]
+  semanticIndexes   SemanticEmailIndex[]
+  memoryNodes       MemoryNode[]
+  memoryRelations   MemoryRelation[]
+  agentWorkflowApprovals AgentWorkflowApproval[]
+  styleProfile      StyleProfile?
+  subscription      Subscription?
+  threads           Thread[]
+  stats             UserStats?
 
   @@map("users")
 }
 
 model StyleProfile {
-  id               String   @id @default(uuid())
-  userId           String   @unique @map("user_id")
-  tone             String?  // casual, formal, friendly
-  formalityScore   Int      @default(5) @map("formality_score")
-  avgSentenceLength Int     @default(15) @map("avg_sentence_length")
-  commonOpeners    String[] @map("common_openers")
-  commonClosers    String[] @map("common_closers")
-  punctuationStyle String?  @map("punctuation_style")
-  vocabularyLevel  String?  @map("vocabulary_level")
-  rawProfile       Json?    @map("raw_profile")
-  lastLearnedAt    DateTime @default(now()) @map("last_learned_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String   @id @default(uuid())
+  userId            String   @unique @map("user_id")
+  tone              String?
+  formalityScore    Int      @default(5) @map("formality_score")
+  avgSentenceLength Int      @default(15) @map("avg_sentence_length")
+  commonOpeners     String[] @map("common_openers")
+  commonClosers     String[] @map("common_closers")
+  punctuationStyle  String?  @map("punctuation_style")
+  vocabularyLevel   String?  @map("vocabulary_level")
+  rawProfile        Json?    @map("raw_profile")
+  lastLearnedAt     DateTime @default(now()) @map("last_learned_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("style_profiles")
 }
@@ -75,7 +77,6 @@ model PushSubscription {
   p256dh    String
   auth      String
   createdAt DateTime @default(now()) @map("created_at")
-
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("push_subscriptions")
@@ -85,13 +86,12 @@ model OAuthToken {
   id           String   @id @default(uuid())
   userId       String   @map("user_id")
   email        String
-  accessToken  String   @db.Text @map("access_token")
-  refreshToken String   @db.Text @map("refresh_token")
+  accessToken  String   @map("access_token")
+  refreshToken String   @map("refresh_token")
   tokenExpiry  DateTime @map("token_expiry")
   scope        String?
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
-
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, email])
@@ -103,12 +103,11 @@ model AITraining {
   id           String   @id @default(uuid())
   userId       String   @map("user_id")
   emailId      String   @map("email_id")
-  originalText String   @db.Text @map("original_text")
-  editedText   String   @db.Text @map("edited_text")
+  originalText String   @map("original_text")
+  editedText   String   @map("edited_text")
   tone         String?
   context      String?
   createdAt    DateTime @default(now()) @map("created_at")
-
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -117,50 +116,52 @@ model AITraining {
 }
 
 model Email {
-  id             String    @id @default(uuid())
-  userId         String    @map("user_id")
-  accountId      String?   @map("account_id")
-  messageId      String?   @map("message_id")
-  threadId       String?   @map("thread_id")
-  subject        String?
-  body           String?   @db.Text
-  snippet        String?
-  summary        String?   @db.Text
-  tasks          Json?
-  priority       String    @default("normal")
-  category       String    @default("uncategorized")
-  labels         String[]  @default([])
-  actionRequired Boolean   @default(false) @map("action_required")
-  sender         String?
-  senderName     String?   @map("sender_name")
-  recipients     String[]  @map("recipients")
-  gmailLabelIds  String[]  @default([]) @map("gmail_label_ids")
-  isSent         Boolean   @default(false) @map("is_sent")
-  isSentByUser   Boolean   @default(false) @map("is_sent_by_user")
-  isEditedReply  Boolean   @default(false) @map("is_edited_reply")
-  followUp       Boolean   @default(false) @map("follow_up")
-  followUpAt     DateTime? @map("follow_up_at")
-  receivedAt     DateTime  @default(now()) @map("received_at")
-  isRead         Boolean   @default(false) @map("is_read")
-  isStarred      Boolean   @default(false) @map("is_starred")
-  aiConfidence   Float?    @map("ai_confidence")
-  categorizedAt  DateTime? @map("categorized_at")
-  provider       String    @default("gmail")
-  priorityScore  Float     @default(0.5) @map("priority_score")
-  priorityReason String?   @map("priority_reason")
-  priorityScoredAt DateTime? @map("priority_scored_at")
-  searchVector   Unsupported("tsvector")? @map("search_vector")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  id               String                   @id @default(uuid())
+  userId           String                   @map("user_id")
+  accountId        String?                  @map("account_id")
+  messageId        String?                  @map("message_id")
+  threadId         String?                  @map("thread_id")
+  subject          String?
+  body             String?
+  snippet          String?
+  summary          String?
+  tasks            Json?
+  priority         String                   @default("normal")
+  category         String                   @default("uncategorized")
+  labels           String[]                 @default([])
+  actionRequired   Boolean                  @default(false) @map("action_required")
+  sender           String?
+  senderName       String?                  @map("sender_name")
+  recipients       String[]                 @map("recipients")
+  gmailLabelIds    String[]                 @default([]) @map("gmail_label_ids")
+  isSent           Boolean                  @default(false) @map("is_sent")
+  isSentByUser     Boolean                  @default(false) @map("is_sent_by_user")
+  isEditedReply    Boolean                  @default(false) @map("is_edited_reply")
+  followUp         Boolean                  @default(false) @map("follow_up")
+  followUpAt       DateTime?                @map("follow_up_at")
+  receivedAt       DateTime                 @default(now()) @map("received_at")
+  isRead           Boolean                  @default(false) @map("is_read")
+  isStarred        Boolean                  @default(false) @map("is_starred")
+  aiConfidence     Float?                   @map("ai_confidence")
+  categorizedAt    DateTime?                @map("categorized_at")
+  provider         String                   @default("gmail")
+  priorityScore    Float                    @default(0.5) @map("priority_score")
+  priorityReason   String?                  @map("priority_reason")
+  priorityScoredAt DateTime?                @map("priority_scored_at")
+  searchVector     Unsupported("tsvector")? @map("search_vector")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  actionItems      ActionItem[]
+  aiLogs           AILog[]
+  attachments      Attachment[]
+  account          EmailAccount?            @relation(fields: [accountId], references: [id])
+  thread           Thread?                  @relation(fields: [threadId], references: [id])
+  user             User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  followUps        FollowUp[]
+  semanticIndex    SemanticEmailIndex?
+  agentWorkflowApprovals AgentWorkflowApproval[]
 
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  thread         Thread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
-  account        EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  aiLogs         AILog[]
-  actionItems    ActionItem[]
-  followUps      FollowUp[]
-  attachments    Attachment[]
-
+  @@unique([userId, messageId])
   @@index([userId, receivedAt(sort: Desc)])
   @@index([userId, category])
   @@index([userId, receivedAt(sort: Desc), category])
@@ -168,7 +169,6 @@ model Email {
   @@index([threadId])
   @@index([accountId])
   @@index([priority])
-  @@unique([userId, messageId])
   @@map("emails")
 }
 
@@ -180,7 +180,6 @@ model Attachment {
   sizeBytes   Int?     @map("size_bytes")
   storageKey  String   @map("storage_key")
   createdAt   DateTime @default(now()) @map("created_at")
-
   email       Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
 
   @@index([emailId])
@@ -188,49 +187,48 @@ model Attachment {
 }
 
 model Thread {
-  id             String    @id
-  userId         String    @map("user_id")
-  summary        String?   @db.Text
-  priority       String    @default("normal")
-  category       String    @default("general")
-  actionRequired Boolean   @default(false) @map("action_required")
+  id             String   @id
+  userId         String   @map("user_id")
+  summary        String?
+  priority       String   @default("normal")
+  category       String   @default("general")
+  actionRequired Boolean  @default(false) @map("action_required")
   company        String?
   role           String?
   deadline       String?
-  lastReceivedAt DateTime  @map("last_received_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReceivedAt DateTime @map("last_received_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
   emails         Email[]
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, lastReceivedAt])
   @@map("threads")
 }
 
 model EmailAccount {
-  id           String   @id @default(uuid())
-  userId       String   @map("user_id")
-  provider     String   @default("gmail")
+  id           String       @id @default(uuid())
+  userId       String       @map("user_id")
+  provider     String       @default("gmail")
   email        String
-  displayName  String?  @map("display_name")
-  isPrimary    Boolean  @default(false) @map("is_primary")
+  displayName  String?      @map("display_name")
+  isPrimary    Boolean      @default(false) @map("is_primary")
   color        String?
-  syncEnabled  Boolean  @default(true) @map("sync_enabled")
-  accessToken  String?  @db.Text @map("access_token")
-  refreshToken String?  @db.Text @map("refresh_token")
-  tokenExpiry  DateTime? @map("token_expiry")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  lastSyncAt   DateTime? @map("last_sync_at")
+  syncEnabled  Boolean      @default(true) @map("sync_enabled")
+  accessToken  String?      @map("access_token")
+  refreshToken String?      @map("refresh_token")
+  tokenExpiry  DateTime?    @map("token_expiry")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  lastSyncAt       DateTime?    @map("last_sync_at")
+  requiresReconnect Boolean     @default(false) @map("requires_reconnect")
+  actionItems      ActionItem[]
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails           Email[]
+  followUps        FollowUp[]
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emails       Email[]
-  actionItems  ActionItem[]
-  followUps    FollowUp[]
-
-  @@index([userId])
   @@unique([provider, email])
+  @@index([userId])
   @@map("email_accounts")
 }
 
@@ -242,7 +240,6 @@ model UserStats {
   timeSaved       Int      @default(0)
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
-
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_stats")
@@ -253,13 +250,12 @@ model AILog {
   emailId    String   @map("email_id")
   userId     String   @map("user_id")
   actionType String   @map("action_type")
-  prompt     String?  @db.Text
-  response   String?  @db.Text
+  prompt     String?
+  response   String?
   model      String?
   createdAt  DateTime @default(now()) @map("created_at")
-
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   email      Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([emailId])
   @@index([userId])
@@ -268,23 +264,22 @@ model AILog {
 }
 
 model ActionItem {
-  id           String    @id @default(uuid())
-  userId       String    @map("user_id")
-  accountId    String?   @map("account_id")
-  emailId      String    @map("email_id")
-  threadId     String?   @map("thread_id")
-  title        String
-  description  String?   @db.Text
-  assignee     String?   // me | sender | other
-  dueDate      DateTime? @map("due_date")
-  priority     String    @default("medium") // high | medium | low
-  status       String    @default("pending") // pending | done | dismissed
-  extractedAt  DateTime  @default(now()) @map("extracted_at")
-  completedAt  DateTime? @map("completed_at")
-
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  email        Email     @relation(fields: [emailId], references: [id], onDelete: Cascade)
-  account      EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  id          String        @id @default(uuid())
+  userId      String        @map("user_id")
+  accountId   String?       @map("account_id")
+  emailId     String        @map("email_id")
+  threadId    String?       @map("thread_id")
+  title       String
+  description String?
+  assignee    String?
+  dueDate     DateTime?     @map("due_date")
+  priority    String        @default("medium")
+  status      String        @default("pending")
+  extractedAt DateTime      @default(now()) @map("extracted_at")
+  completedAt DateTime?     @map("completed_at")
+  account     EmailAccount? @relation(fields: [accountId], references: [id])
+  email       Email         @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status, dueDate])
   @@index([accountId])
@@ -292,24 +287,23 @@ model ActionItem {
 }
 
 model FollowUp {
-  id              String    @id @default(uuid())
-  userId          String    @map("user_id")
-  accountId       String?   @map("account_id")
-  sentEmailId     String    @map("sent_email_id")
-  threadId        String    @map("thread_id")
-  recipientEmail  String    @map("recipient_email")
+  id              String        @id @default(uuid())
+  userId          String        @map("user_id")
+  accountId       String?       @map("account_id")
+  sentEmailId     String        @map("sent_email_id")
+  threadId        String        @map("thread_id")
+  recipientEmail  String        @map("recipient_email")
   subject         String
-  sentAt          DateTime  @map("sent_at")
-  remindAt        DateTime  @map("remind_at")
-  replyReceivedAt DateTime? @map("reply_received_at")
-  status          String    @default("waiting") // waiting | replied | snoozed | dismissed
-  snoozedUntil    DateTime? @map("snoozed_until")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  email           Email     @relation(fields: [sentEmailId], references: [id], onDelete: Cascade)
-  account         EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  sentAt          DateTime      @map("sent_at")
+  remindAt        DateTime      @map("remind_at")
+  replyReceivedAt DateTime?     @map("reply_received_at")
+  status          String        @default("waiting")
+  snoozedUntil    DateTime?     @map("snoozed_until")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  account         EmailAccount? @relation(fields: [accountId], references: [id])
+  email           Email         @relation(fields: [sentEmailId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status, remindAt])
   @@index([accountId])
@@ -317,34 +311,32 @@ model FollowUp {
 }
 
 model DailyDigest {
-  id           String   @id @default(uuid())
-  userId       String   @map("user_id")
-  digestDate   DateTime @map("digest_date")
-  scheduledAt  DateTime @map("scheduled_at")
-  deliveredAt  DateTime? @map("delivered_at")
-  content      Json     // { emails[], actions[], followups[] }
-  emailSent    Boolean  @default(false) @map("email_sent")
-  openedAt     DateTime? @map("opened_at")
-  status       String   @default("pending") // pending | sent | failed
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  digestDate  DateTime  @map("digest_date")
+  scheduledAt DateTime  @map("scheduled_at")
+  deliveredAt DateTime? @map("delivered_at")
+  content     Json
+  emailSent   Boolean   @default(false) @map("email_sent")
+  openedAt    DateTime? @map("opened_at")
+  status      String    @default("pending")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, digestDate])
   @@map("daily_digests")
 }
 
 model DigestPreference {
-  id               String   @id @default(uuid())
-  userId           String   @unique @map("user_id")
-  sendTime         String   @default("07:30") @map("send_time")
-  timezone         String   @default("UTC")
-  emailEnabled     Boolean  @default(true) @map("email_enabled")
-  includeActions   Boolean  @default(true) @map("include_actions")
-  includeFollowups Boolean  @default(true) @map("include_followups")
-  includeCalendar  Boolean  @default(true) @map("include_calendar")
-  maxEmails        Int      @default(5) @map("max_emails")
-
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String  @id @default(uuid())
+  userId           String  @unique @map("user_id")
+  sendTime         String  @default("07:30") @map("send_time")
+  timezone         String  @default("UTC")
+  emailEnabled     Boolean @default(true) @map("email_enabled")
+  includeActions   Boolean @default(true) @map("include_actions")
+  includeFollowups Boolean @default(true) @map("include_followups")
+  includeCalendar  Boolean @default(true) @map("include_calendar")
+  maxEmails        Int     @default(5) @map("max_emails")
+  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("digest_preferences")
 }
@@ -363,7 +355,6 @@ model Subscription {
   trialEnd             DateTime? @map("trial_end")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
-
   user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([stripeCustomerId])
@@ -372,13 +363,12 @@ model Subscription {
 }
 
 model AnalyticsEvent {
-  id               String   @id @default(uuid())
-  userId           String   @map("user_id")
-  eventType        String   @map("event_type") // email_processed | action_completed | followup_sent | digest_opened
-  metadata         Json?    @map("metadata") // { email_id, time_saved_seconds, category }
-  createdAt        DateTime @default(now()) @map("created_at")
-
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  eventType String   @map("event_type")
+  metadata  Json?    @map("metadata")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([eventType])
@@ -388,12 +378,11 @@ model AnalyticsEvent {
 
 model AnalyticsDaily {
   userId           String   @map("user_id")
-  date             DateTime @map("date") // Day being summarized (midnight)
+  date             DateTime @map("date")
   emailsProcessed  Int      @default(0) @map("emails_processed")
   actionsCompleted Int      @default(0) @map("actions_completed")
   followupsSent    Int      @default(0) @map("followups_sent")
   timeSavedSeconds Int      @default(0) @map("time_saved_seconds")
-
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, date])
@@ -402,20 +391,19 @@ model AnalyticsDaily {
 }
 
 model CalendarEvent {
-  id              String   @id @default(uuid())
-  userId          String   @map("user_id")
-  googleEventId   String   @map("google_event_id")
-  calendarId      String   @map("calendar_id")
-  title           String
-  description     String?  @db.Text
-  startTime       DateTime @map("start_time")
-  endTime         DateTime @map("end_time")
-  attendees       Json?    // Array of { email, name, response_status }
-  meetingLink     String?  @map("meeting_link")
-  linkedEmailId   String?  @map("linked_email_id")
-  syncedAt        DateTime @default(now()) @map("synced_at")
-
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  googleEventId String   @map("google_event_id")
+  calendarId    String   @map("calendar_id")
+  title         String
+  description   String?
+  startTime     DateTime @map("start_time")
+  endTime       DateTime @map("end_time")
+  attendees     Json?
+  meetingLink   String?  @map("meeting_link")
+  linkedEmailId String?  @map("linked_email_id")
+  syncedAt      DateTime @default(now()) @map("synced_at")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, googleEventId])
   @@map("calendar_events")
@@ -424,15 +412,105 @@ model CalendarEvent {
 model ClientErrorLog {
   id            String   @id @default(uuid())
   userId        String?  @map("user_id")
-  errorMessage  String   @map("error_message") @db.Text
-  errorStack    String?  @map("error_stack") @db.Text
+  errorMessage  String   @map("error_message")
+  errorStack    String?  @map("error_stack")
   componentName String?  @map("component_name")
   pageUrl       String?  @map("page_url")
   browserInfo   Json?    @map("browser_info")
   createdAt     DateTime @default(now()) @map("created_at")
-
-  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user          User?    @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("client_error_logs")
+}
+
+model FailedJob {
+  id        String   @id @default(uuid())
+  jobId     String   @map("job_id")
+  queueName String   @map("queue_name")
+  jobName   String   @map("job_name")
+  payload   Json
+  error     String
+  attempts  Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([queueName])
+  @@map("failed_jobs")
+}
+
+model SemanticEmailIndex {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  emailId        String   @unique @map("email_id")
+  contentHash    String   @map("content_hash")
+  subjectText    String?  @map("subject_text")
+  searchText     String   @map("search_text")
+  embedding      Json
+  embeddingModel String   @map("embedding_model")
+  provider       String   @default("local-hash")
+  indexedAt      DateTime @default(now()) @map("indexed_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  email          Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, indexedAt(sort: Desc)])
+  @@map("semantic_email_index")
+}
+
+model MemoryNode {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String   // Entity name (e.g. "Sarah", "Microsoft", "Q3 Hiring")
+  type      String   // Entity type (e.g. "person", "company", "project", "deadline", "commitment")
+  metadata  Json?    // Extracted detail (e.g. email reference, description, role)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Graph relationships where this node is the source or target
+  sources   MemoryRelation[] @relation("SourceNode")
+  targets   MemoryRelation[] @relation("TargetNode")
+
+  @@unique([userId, name, type])
+  @@index([userId])
+  @@index([type])
+  @@map("memory_nodes")
+}
+
+model MemoryRelation {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  sourceId  String   @map("source_id")
+  targetId  String   @map("target_id")
+  type      String   // Relationship type (e.g. "works_at", "committed_to", "mentioned_in")
+  metadata  Json?    // Optional connection context (e.g. emailId, context snippet)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source    MemoryNode @relation("SourceNode", fields: [sourceId], references: [id], onDelete: Cascade)
+  target    MemoryNode @relation("TargetNode", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sourceId, targetId, type])
+  @@index([userId])
+  @@map("memory_relations")
+}
+
+model AgentWorkflowApproval {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  emailId     String?  @map("email_id")
+  triggerType String   @map("trigger_type") // e.g. "meeting_request", "invoice_overdue"
+  title       String   // e.g. "Schedule meeting with Sarah"
+  description String?  // AI rationale for the workflow
+  status      String   @default("pending") // "pending", "approved", "rejected", "executed"
+  actionData  Json     // The raw task instructions (e.g. proposed draft reply, draft calendar event)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     Email?   @relation(fields: [emailId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@map("agent_workflow_approvals")
 }

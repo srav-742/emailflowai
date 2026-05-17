@@ -12,7 +12,7 @@ import { connectSocket } from '../services/socket';
 import './EmailList.css';
 
 const EmailList = ({ filter = {}, title = 'Inbox command center', description = 'Review and process every thread in one place.' }) => {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const { selectedAccountId } = useAccounts();
   const emails = useEmailStore((state) => state.emails);
   const setEmails = useEmailStore((state) => state.setEmails);
@@ -37,10 +37,10 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
     setTimeout(() => setLiveMessage(''), 6000);
   });
 
-  const fetchEmails = useCallback(async (reset = false) => {
+  const fetchEmails = useCallback(async (reset = false, explicitCursor = null) => {
     try {
       setLoading(reset);
-      const currentCursor = reset ? null : cursor;
+      const currentCursor = reset ? null : explicitCursor;
       const params = {
         limit: pagination.limit,
         cursor: currentCursor,
@@ -61,11 +61,7 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
       const data = response.data || {};
       const newEmails = data.emails || [];
       
-      if (reset) {
-        setEmails(newEmails);
-      } else {
-        setEmails([...emails, ...newEmails]);
-      }
+      setEmails((currentEmails) => (reset ? newEmails : [...currentEmails, ...newEmails]));
 
       setCursor(data.pagination?.nextCursor || null);
       setHasMore(Boolean(data.pagination?.nextCursor));
@@ -74,11 +70,11 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
     } finally {
       setLoading(false);
     }
-  }, [activeTab, cursor, emails, pagination.limit, query, setEmails, setLoading, viewMode, selectedAccountId]);
+  }, [activeTab, pagination.limit, query, setEmails, setLoading, viewMode, selectedAccountId]);
 
   useEffect(() => {
-    fetchEmails(true);
-  }, [activeTab, query, viewMode, selectedAccountId]);
+    void fetchEmails(true);
+  }, [fetchEmails]);
 
   // 2. Fallback: Socket.IO for older browser support or specific event types
   useEffect(() => {
@@ -106,10 +102,6 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
     };
   }, [user?.hasGmailAccess, user?.id]);
 
-  const handlePageChange = (newPage) => {
-    setPagination((prev) => ({ ...prev, page: newPage }));
-  };
-
   const handleSync = async () => {
     try {
       setLoading(true);
@@ -133,7 +125,7 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
       await fetchEmails(true);
     } catch (error) {
       console.error('Failed to sync emails:', error);
-      setSyncMessage(error.response?.data?.error || 'Unable to sync Gmail right now. Your saved inbox is still available.');
+      setSyncMessage(error.response?.data?.error || (user?.hasGmailAccess ? 'Unable to sync Gmail right now. Your saved inbox is still available.' : 'Reconnect Gmail to resume live inbox sync.'));
     } finally {
       setLoading(false);
     }
@@ -244,9 +236,9 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
         )}
       </div>
 
-      {hasMore && !selectedThreadId && (
+        {hasMore && !selectedThreadId && (
         <div className="pagination-row">
-          <button className="button button-ghost" onClick={() => fetchEmails(false)}>
+          <button className="button button-ghost" onClick={() => fetchEmails(false, cursor)}>
             Load more emails
           </button>
         </div>

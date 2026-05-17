@@ -1,40 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
+import RecoverableErrorState from '../components/RecoverableErrorState';
+import api from '../services/api';
 
 const AnalyticsPage = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [summaryRes, sendersRes, categoriesRes] = await Promise.all([
+        api.get('/analytics/summary'),
+        api.get('/analytics/senders'),
+        api.get('/analytics/categories'),
+      ]);
+
+      setData({
+        totals: summaryRes.data.totals,
+        daily: summaryRes.data.daily,
+        topSenders: sendersRes.data,
+        categories: categoriesRes.data,
+      });
+    } catch (err) {
+      console.error('Analytics fetch error:', err);
+      setError(err.response?.data?.error || 'Failed to load analytics. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const token = localStorage.getItem('token');
-        const headers = { Authorization: `Bearer ${token}` };
-        
-        const [summaryRes, sendersRes, categoriesRes] = await Promise.all([
-          axios.get('/api/analytics/summary', { headers }),
-          axios.get('/api/analytics/senders', { headers }),
-          axios.get('/api/analytics/categories', { headers }),
-        ]);
-
-        setData({
-          totals: summaryRes.data.totals,
-          daily: summaryRes.data.daily,
-          topSenders: sendersRes.data,
-          categories: categoriesRes.data
-        });
-      } catch (err) {
-        console.error('Analytics fetch error:', err);
-        setError('Failed to load analytics. Please try again later.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
+    void fetchData();
   }, []);
 
   if (loading) {
@@ -48,9 +48,12 @@ const AnalyticsPage = () => {
 
   if (error) {
     return (
-      <div className="error-container">
-        <p className="error-message">{error}</p>
-      </div>
+      <RecoverableErrorState
+        title="Analytics are temporarily unavailable"
+        message={error}
+        retryLabel="Retry analytics"
+        onRetry={() => void fetchData()}
+      />
     );
   }
 

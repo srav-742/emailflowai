@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 const setupSteps = [
-  'Open Google Cloud Console and edit the OAuth 2.0 Client ID used by EmailFlow.',
-  'Paste the exact Authorized redirect URI shown below into the Google OAuth client settings.',
-  'Save the credentials, return here, and click Connect Gmail again.',
+  'Verify the Google account you want to connect.',
+  'Approve Gmail and Calendar access on the Google consent screen.',
+  'Return to EmailFlow and resume live sync automatically.',
 ];
 
 const GmailConnect = () => {
@@ -14,8 +14,36 @@ const GmailConnect = () => {
   const [error, setError] = useState(null);
   const [oauthSetup, setOauthSetup] = useState(null);
   const [copied, setCopied] = useState(false);
-  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { user, gmailReconnectState } = useAuth();
   const navigate = useNavigate();
+
+  const reconnectMode = searchParams.get('mode') === 'reconnect' || gmailReconnectState?.required;
+  const heroTitle = reconnectMode
+    ? 'Restore Gmail access and resume your live workspace.'
+    : 'Connect Gmail once and unlock the full live inbox workflow.';
+  const heroBody = reconnectMode
+    ? 'EmailFlow already detected that Google revoked or expired one of your refresh tokens. Reconnect below and background sync will resume without disturbing the rest of your workspace.'
+    : 'Approve Gmail and Calendar access once so EmailFlow can sync messages, classify priority, surface meetings, and keep your workspace current.';
+  const ctaLabel = reconnectMode ? 'Reconnect Gmail' : 'Connect Gmail';
+
+  const statusItems = useMemo(() => ([
+    {
+      label: 'Workspace',
+      value: user?.email || 'Signed in',
+      note: reconnectMode ? 'Your account session is healthy. Only Gmail access needs renewal.' : 'Your protected workspace is already ready.',
+    },
+    {
+      label: 'OAuth status',
+      value: reconnectMode ? 'Recovery' : 'Ready',
+      note: reconnectMode ? 'A fresh Google consent will replace the invalid refresh token.' : 'Google will return you here after approval.',
+    },
+    {
+      label: 'Live sync',
+      value: reconnectMode ? 'Paused' : 'Pending',
+      note: reconnectMode ? 'Sync resumes automatically after a successful reconnect.' : 'Messages and calendar data start flowing right after connect.',
+    },
+  ]), [reconnectMode, user?.email]);
 
   useEffect(() => {
     let active = true;
@@ -25,16 +53,17 @@ const GmailConnect = () => {
         const response = await authAPI.getGmailAuthUrl();
         if (active) {
           setOauthSetup(response.data);
+          setError(null);
         }
       } catch (err) {
         console.error('Gmail setup preload error:', err);
         if (active) {
-          setError('We could not load the Gmail OAuth configuration. Please confirm the backend is running.');
+          setError('We could not load the Gmail authorization details. Please confirm the backend is running and try again.');
         }
       }
     };
 
-    loadOauthSetup();
+    void loadOauthSetup();
 
     return () => {
       active = false;
@@ -49,11 +78,10 @@ const GmailConnect = () => {
       if (!oauthSetup) {
         setOauthSetup(response.data);
       }
-      // Redirect to Google OAuth for Gmail permissions
       window.location.href = response.data.url;
     } catch (err) {
       console.error('Gmail connect error:', err);
-      setError('Failed to connect Gmail. Please try again.');
+      setError('Failed to open the Google authorization screen. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -72,8 +100,8 @@ const GmailConnect = () => {
       await navigator.clipboard.writeText(oauthSetup.redirectUri);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
-    } catch (error) {
-      console.error('Copy redirect URI error:', error);
+    } catch (copyError) {
+      console.error('Copy redirect URI error:', copyError);
     }
   };
 
@@ -83,48 +111,37 @@ const GmailConnect = () => {
         <div className="hero-glow hero-glow-left"></div>
         <div className="hero-glow hero-glow-right"></div>
         <div className="auth-hero-copy">
-          <span className="eyebrow">Gmail authorization</span>
-          <h1>One exact redirect URI unlocks live inbox sync.</h1>
-          <p>
-            Your Google screen is failing because the OAuth client in Google Cloud does not yet trust the redirect URI
-            the app is sending. EmailFlow now shows that exact URI below so you can fix it without guessing.
-          </p>
+          <span className="eyebrow">{reconnectMode ? 'Gmail recovery' : 'Gmail authorization'}</span>
+          <h1>{heroTitle}</h1>
+          <p>{heroBody}</p>
         </div>
 
         <div className="auth-stage-strip">
           <article className="auth-stage-card">
             <span className="stage-index">01</span>
-            <strong>Firebase sign-in</strong>
-            <p>Your private workspace is already created for {user?.email || 'this account'}.</p>
+            <strong>Workspace ready</strong>
+            <p>Your secure EmailFlow workspace is already active for {user?.email || 'this account'}.</p>
           </article>
           <article className="auth-stage-card">
             <span className="stage-index">02</span>
-            <strong>Gmail consent</strong>
-            <p>Google needs one matching callback URL before it will grant Gmail access.</p>
+            <strong>{reconnectMode ? 'Token renewal' : 'Google consent'}</strong>
+            <p>{reconnectMode ? 'Google issues a fresh token set for inbox and calendar access.' : 'Grant Google permissions once to activate full inbox sync.'}</p>
           </article>
           <article className="auth-stage-card">
             <span className="stage-index">03</span>
-            <strong>Live sync</strong>
-            <p>Once approved, EmailFlow can fetch emails, summarize, classify, and send replies.</p>
+            <strong>Live sync resumes</strong>
+            <p>Messages, replies, and meeting sync come back online automatically after approval.</p>
           </article>
         </div>
 
         <div className="hero-score-grid">
-          <article className="hero-score-card">
-            <strong>OAuth</strong>
-            <span>Exact match required</span>
-            <p>Google rejects even a one-port difference in the redirect URI.</p>
-          </article>
-          <article className="hero-score-card">
-            <strong>Secure</strong>
-            <span>Backend token storage</span>
-            <p>Gmail tokens are stored server-side in PostgreSQL-linked user records.</p>
-          </article>
-          <article className="hero-score-card">
-            <strong>Ready</strong>
-            <span>AI inbox actions</span>
-            <p>Summaries, categories, drafts, and send flow are ready after this step.</p>
-          </article>
+          {statusItems.map((item) => (
+            <article key={item.label} className="hero-score-card">
+              <strong>{item.value}</strong>
+              <span>{item.label}</span>
+              <p>{item.note}</p>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -132,30 +149,30 @@ const GmailConnect = () => {
         <div className="auth-card-header">
           <span className="brand-mark">GM</span>
           <div>
-            <h2>Connect your Gmail inbox</h2>
-            <p>Finish the integration with the exact Google OAuth settings this app expects.</p>
+            <h2>{reconnectMode ? 'Reconnect your Gmail inbox' : 'Connect your Gmail inbox'}</h2>
+            <p>{reconnectMode ? 'Replace the expired token and bring live sync back online.' : 'Finish the secure Google authorization step and activate your inbox workspace.'}</p>
           </div>
         </div>
 
         <div className="connection-status-card">
-          <span className="eyebrow">Workspace owner</span>
+          <span className="eyebrow">{reconnectMode ? 'Recovery status' : 'Workspace owner'}</span>
           <h3>{user?.name || user?.email || 'EmailFlow user'}</h3>
-          <p>We use a separate Gmail OAuth step so long-lived inbox access is stored safely on the backend and never in the browser.</p>
-        </div>
-
-        <div className="inline-alert warning-alert" style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem' }}>
-          <strong style={{ color: '#f59e0b', display: 'block', marginBottom: '0.25rem' }}>⚠️ Calendar Access Required</strong>
-          <p style={{ margin: 0, fontSize: '0.9rem', color: '#d97706' }}>
-            When the Google screen appears, you <strong>MUST</strong> check the boxes for:
-            <ul style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-              <li>View and edit Google Calendar events</li>
-              <li>View Google Calendar events</li>
-            </ul>
-            Otherwise, your schedule and reminders will not sync.
+          <p>
+            {reconnectMode
+              ? (gmailReconnectState?.message || 'Google access expired for one of your connected inboxes. A fresh Gmail authorization will restore background sync.')
+              : 'We use a dedicated Gmail OAuth step so long-lived inbox access is stored safely on the backend and never in the browser.'}
           </p>
         </div>
 
-        {error && <div className="inline-alert error-alert">{error}</div>}
+        <div className="inline-alert warning-alert" style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem' }}>
+          <strong style={{ color: '#f59e0b', display: 'block', marginBottom: '0.25rem' }}>Calendar access stays in the same flow</strong>
+          <p style={{ margin: 0, fontSize: '0.9rem', color: '#d97706' }}>
+            When the Google screen opens, approve both Gmail and Calendar scopes so EmailFlow can keep inbox sync,
+            meeting sync, and reminder creation active in one pass.
+          </p>
+        </div>
+
+        {error ? <div className="inline-alert error-alert">{error}</div> : null}
 
         <div className="oauth-diagnostic-card">
           <div className="oauth-line">
@@ -182,8 +199,8 @@ const GmailConnect = () => {
             </div>
           ))}
           <div className="helper-item">
-            <strong>Why error 400 happens</strong>
-            <span>The Google OAuth client does not contain the exact redirect URI shown above, so Google blocks the request before returning to EmailFlow.</span>
+            <strong>Secure token storage</strong>
+            <span>Gmail access tokens stay on the backend so the reconnect flow restores sync without exposing long-lived credentials in the browser.</span>
           </div>
         </div>
 
@@ -192,94 +209,15 @@ const GmailConnect = () => {
             {copied ? 'Redirect copied' : 'Copy redirect URI'}
           </button>
           <button className="button button-primary" onClick={connectGmail} disabled={loading || !oauthSetup?.url}>
-            {loading ? 'Redirecting to Gmail...' : 'Connect Gmail'}
+            {loading ? 'Opening Google...' : ctaLabel}
           </button>
           <button className="button button-secondary" onClick={skipForNow}>
-            Continue without Gmail
+            {reconnectMode ? 'Back to workspace' : 'Continue without Gmail'}
           </button>
         </div>
       </section>
     </div>
   );
-
-  /*
-  return (
-    <div className="login-container">
-      <div className="login-card">
-        <div className="login-header">
-          <div className="login-logo">📧</div>
-          <h1>Connect Your Gmail</h1>
-          <p>Grant access to fetch and manage your emails</p>
-        </div>
-
-        {error && (
-          <div className="error-message" style={{ color: 'red', marginBottom: '1rem', padding: '0.5rem', backgroundColor: '#fee', borderRadius: '4px' }}>
-            {error}
-          </div>
-        )}
-
-        <div className="login-features">
-          <div className="feature-item">
-            <span className="feature-icon">📨</span>
-            <div>
-              <h3>Fetch Emails</h3>
-              <p>Import your emails from Gmail</p>
-            </div>
-          </div>
-          <div className="feature-item">
-            <span className="feature-icon">🤖</span>
-            <div>
-              <h3>AI Processing</h3>
-              <p>Summarize and classify emails</p>
-            </div>
-          </div>
-          <div className="feature-item">
-            <span className="feature-icon">🔒</span>
-            <div>
-              <h3>Secure Access</h3>
-              <p>Your data is encrypted and private</p>
-            </div>
-          </div>
-        </div>
-
-        <button
-          className="google-login-btn"
-          onClick={connectGmail}
-          disabled={loading}
-          style={{ marginBottom: '1rem' }}
-        >
-          {loading ? (
-            'Connecting...'
-          ) : (
-            <>
-              <svg width="20" height="20" viewBox="0 0 24 24">
-                <path fill="#EA4335" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-              </svg>
-              Connect with Gmail
-            </>
-          )}
-        </button>
-
-        <button
-          onClick={skipForNow}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#667eea',
-            cursor: 'pointer',
-            fontSize: '0.9rem',
-            textDecoration: 'underline'
-          }}
-        >
-          Skip for now (Limited functionality)
-        </button>
-      </div>
-    </div>
-  );
-  */
 };
 
 export default GmailConnect;

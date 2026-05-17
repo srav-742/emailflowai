@@ -16,13 +16,8 @@
  *     every subsequent call within the same session picks up the fresh token.
  */
 
-const { google } = require('googleapis');
-const prisma = require('../config/database');
 const { getAuthClient, getGmailClient } = require('../lib/google/getAuthClient');
-const { decrypt } = require('../utils/encryption');
-
-/** Threshold in milliseconds before expiry at which we pre-emptively refresh. */
-const EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
+const { createReconnectError, resolveGoogleAccountEmail } = require('./googleConnectionService');
 
 /**
  * Returns a valid (non-expiring) access token for the given user.
@@ -45,17 +40,8 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
  * Returns a valid (non-expiring) access token for the given account or user.
  */
 async function getValidAccessToken(userId, accountId = null) {
-  // Find the email associated with this userId/accountId
-  let email;
-  if (accountId) {
-    const account = await prisma.emailAccount.findUnique({ where: { id: accountId }, select: { email: true } });
-    email = account?.email;
-  } else {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-    email = user?.email;
-  }
-
-  if (!email) throw new Error('No email found for token retrieval.');
+  const email = await resolveGoogleAccountEmail(userId, accountId);
+  if (!email) throw createReconnectError('No connected Gmail account found. Please reconnect Gmail.');
 
   // getAuthClient handles the auto-refresh and database update
   const auth = await getAuthClient(userId, email);
@@ -67,16 +53,8 @@ async function getValidAccessToken(userId, accountId = null) {
  * Convenience helper: builds an authenticated Gmail client.
  */
 async function getAuthenticatedGmailClient(userId, accountId = null) {
-  let email;
-  if (accountId) {
-    const account = await prisma.emailAccount.findUnique({ where: { id: accountId }, select: { email: true } });
-    email = account?.email;
-  } else {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-    email = user?.email;
-  }
-
-  if (!email) throw new Error('No email found for Gmail client creation.');
+  const email = await resolveGoogleAccountEmail(userId, accountId);
+  if (!email) throw createReconnectError('No connected Gmail account found. Please reconnect Gmail.');
 
   return await getGmailClient(userId, email);
 }

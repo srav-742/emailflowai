@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useAccounts } from '../context/AccountContext';
 import AccountSwitcher from './AccountSwitcher';
+import GmailReconnectBanner from './GmailReconnectBanner';
 
 const shellNavItems = [
   { path: '/dashboard', label: 'Dashboard', kicker: 'Overview' },
@@ -10,6 +12,9 @@ const shellNavItems = [
   { path: '/developer', label: 'Developer', kicker: 'Deploys and incidents' },
   { path: '/meetings', label: 'Meetings', kicker: 'Calendar and agenda' },
   { path: '/social', label: 'Social', kicker: 'Community updates' },
+  { path: '/search', label: 'Semantic Search', kicker: 'Natural-language recall' },
+  { path: '/memory', label: 'Memory Graph', kicker: 'Relationship intelligence' },
+  { path: '/workflows', label: 'AI Agent Workflows', kicker: 'Autonomous task queue' },
   { path: '/focus', label: 'Focus Today', kicker: 'Immediate action' },
   { path: '/read-later', label: 'Read Later', kicker: 'When you have time' },
   { path: '/newsletters', label: 'Newsletters', kicker: 'Favorite publications' },
@@ -26,6 +31,9 @@ const pageTitles = {
   '/developer': 'Developer queue',
   '/meetings': 'Meetings and calendar',
   '/social': 'Social and community',
+  '/search': 'Semantic AI search',
+  '/memory': 'Relationship memory graph',
+  '/workflows': 'Autonomous agent workflows',
   '/focus': 'Focus Today',
   '/read-later': 'Read Later',
   '/newsletters': 'Newsletters',
@@ -42,6 +50,9 @@ const pageDescriptions = {
   '/developer': 'Deployments, incidents, pull requests, and engineering notifications.',
   '/meetings': 'Schedules, invites, agendas, and follow-up threads with less clutter.',
   '/social': 'Community notifications and lower-priority social traffic in one place.',
+  '/search': 'Ask questions across your indexed email history and surface the most relevant threads instantly.',
+  '/memory': 'Map out individuals, organizations, projects, and promises learned from your communication flow.',
+  '/workflows': 'Approve, modify, or reject autonomous action stacks prepared by the Executive AI Orchestrator.',
   '/focus': 'High-priority emails identified by AI as needing immediate focus.',
   '/read-later': 'A collection of interesting content and threads you saved for later.',
   '/newsletters': 'Cleaned and separated newsletter feeds to reduce inbox noise.',
@@ -52,12 +63,19 @@ const pageDescriptions = {
 };
 
 const Layout = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, gmailReconnectState } = useAuth();
+  const { accounts } = useAccounts();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const currentTitle = pageTitles[location.pathname] || 'EmailFlow AI';
   const currentDescription = pageDescriptions[location.pathname] || 'Run your inbox like a focused operations desk.';
+  const reconnectAccount = accounts.find((account) => account.reconnectRequired);
+  const gmailStatus = gmailReconnectState?.required
+    ? 'reconnect'
+    : user?.hasGmailAccess
+      ? 'connected'
+      : 'disconnected';
 
   const handleLogout = async () => {
     await logout();
@@ -125,10 +143,36 @@ const Layout = () => {
 
           {sidebarOpen && (
             <div className="status-stack" style={{ marginTop: '0.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.75rem', borderRadius: '10px', background: user?.hasGmailAccess ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)', border: '1px solid currentColor', color: user?.hasGmailAccess ? '#34d399' : '#fbbf24', fontSize: '0.75rem', fontWeight: 600 }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.4rem 0.75rem',
+                borderRadius: '10px',
+                background: gmailStatus === 'connected'
+                  ? 'rgba(16, 185, 129, 0.1)'
+                  : gmailStatus === 'reconnect'
+                    ? 'rgba(249, 115, 22, 0.12)'
+                    : 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid currentColor',
+                color: gmailStatus === 'connected'
+                  ? '#34d399'
+                  : gmailStatus === 'reconnect'
+                    ? '#fdba74'
+                    : '#fbbf24',
+                fontSize: '0.75rem',
+                fontWeight: 600
+              }}>
                 <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor', boxShadow: '0 0 8px currentColor' }}></span>
-                {user?.hasGmailAccess ? 'GMAIL CONNECTED' : 'GMAIL DISCONNECTED'}
+                {gmailStatus === 'connected'
+                  ? 'GMAIL CONNECTED'
+                  : gmailStatus === 'reconnect'
+                    ? 'RECONNECT REQUIRED'
+                    : 'GMAIL DISCONNECTED'}
               </div>
+              {gmailStatus === 'reconnect' && reconnectAccount?.email ? (
+                <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>{reconnectAccount.email}</span>
+              ) : null}
             </div>
           )}
 
@@ -154,11 +198,14 @@ const Layout = () => {
           </div>
 
           <div className="header-actions">
-            {!user?.hasGmailAccess && (
-              <button className="button button-primary" onClick={() => navigate('/auth/gmail-connect')}>
-                Connect Gmail
+            {!user?.hasGmailAccess || gmailReconnectState?.required ? (
+              <button
+                className="button button-primary"
+                onClick={() => navigate(`/auth/gmail-connect${gmailReconnectState?.required ? '?mode=reconnect' : ''}`)}
+              >
+                {gmailReconnectState?.required ? 'Reconnect Gmail' : 'Connect Gmail'}
               </button>
-            )}
+            ) : null}
             <button className="button button-logout" onClick={handleLogout}>
               Logout
             </button>
@@ -166,6 +213,7 @@ const Layout = () => {
         </header>
 
         <section className="page-content">
+          <GmailReconnectBanner />
           <Outlet />
         </section>
       </main>

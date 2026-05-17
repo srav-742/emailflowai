@@ -1,4 +1,6 @@
 require('dotenv').config();
+const logger = require('./config/logger');
+const { errorHandler } = require('./middleware/errorHandler');
 console.log('🔥 [BOOT] FILE STARTED');
 
 // --- Global error handlers: make ALL crashes visible in Render logs ---
@@ -28,6 +30,7 @@ const webhookRoutes = require('./routes/webhookRoutes');
 const errorRoutes = require('./routes/errorRoutes');
 const { router: sseRouter } = require('./routes/sse');
 const pushRoutes = require('./routes/pushRoutes');
+const semanticRoutes = require('./routes/semanticRoutes');
 const digestService = require('./services/digestService');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
@@ -36,13 +39,16 @@ const { startEmailPolling } = require('./services/emailSyncService');
 const { generalLimiter, aiLimiter } = require('./middleware/rateLimiter');
 const redis = require('./redisClient');
 const { startStyleLearningJob } = require('./jobs/styleLearningJob');
+const { serverAdapter: bullBoardAdapter } = require('./config/bullBoard');
 
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 10000;
+const shouldListen = process.env.NODE_ENV !== 'test';
 
 // NUCLEAR OPTION: Open port IMMEDIATELY to satisfy Render's health check
+if (shouldListen) {
 server.listen(PORT, '0.0.0.0', () => {
   console.log('🔥 [RENDER-FIX] PORT BIND SUCCESSFUL:', PORT);
   console.log('🚀 [BOOT] Initializing services in background...');
@@ -54,6 +60,8 @@ server.listen(PORT, '0.0.0.0', () => {
 console.log('🚀 [BOOT] Attempting to bind port:', PORT);
 
 // Safe background startup
+}
+
 const startServer = async () => {
   // Logic moved to top for immediate port binding
   console.log('📡 [BOOT] startServer() called (port already opening)');
@@ -64,9 +72,14 @@ async function initBackgroundServices() {
   await prisma.$connect();
   console.log('🐘 [DB] Connected');
   
-  const { startEmailPolling } = require('./services/emailSyncService');
-  startEmailPolling(io);
-  startStyleLearningJob();
+  const { initRepeatableJobs } = require('./config/initRepeatableJobs');
+  
+  // Transitions: These are now handled by separate Worker processes (src/workers/index.js)
+  // via BullMQ repeatable jobs.
+  // startEmailPolling(io);
+  // startStyleLearningJob();
+  
+  await initRepeatableJobs();
 }
 
 // startServer() call moved to bottom of file
@@ -188,13 +201,16 @@ app.use(cors({
 
 // Security headers — use unsafe-none for COOP to allow Google OAuth popup communication
 app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });
 
 // Stripe webhooks need raw body, so we place it before express.json()
 app.use('/api/webhooks', webhookRoutes);
+
+// Bull Board Queue Dashboard — http://localhost:<PORT>/admin/queues
+app.use('/admin/queues', bullBoardAdapter.getRouter());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -232,17 +248,13 @@ app.use('/api/push', pushRoutes);
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/calendar', require('./routes/calendarRoutes'));
 app.use('/api/accounts', require('./routes/accountRoutes'));
+app.use('/api/ai/semantic-search', require('./routes/semanticSearchRoutes'));
+app.use('/api/ai/memory', require('./routes/memoryRoutes'));
+app.use('/api/agent', require('./routes/agentRoutes'));
+app.use('/api/semantic', semanticRoutes);
+app.use('/api', require('./routes/test.route'));
 
-// Run analytics aggregation once a day (simulated cron)
-setInterval(() => {
-  const { aggregateDailyStats } = require('./services/analyticsService');
-  aggregateDailyStats();
-}, 24 * 60 * 60 * 1000);
-
-// Start background digest scheduler (check every 15 mins)
-setInterval(() => {
-  digestService.checkAndTriggerDigests().catch(console.error);
-}, 15 * 60 * 1000);
+// Transitioned: Analytics and Digest scheduling moved to BullMQ Scheduler in initRepeatableJobs.js
 
 app.get('/api/debug/db', async (req, res) => {
   const dbConfig = require('./config/database');
@@ -321,6 +333,8 @@ app.use((req, res, next) => {
   });
 });
 
+app.use(errorHandler);
+
 // Socket.IO connection
 io.on('connection', (socket) => {
   const user = socket.data.user;
@@ -349,7 +363,8 @@ io.on('connection', (socket) => {
 // Make io accessible to routes
 app.set('io', io);
 
-module.exports = { app, io };
+module.exports = { app, io, server, buildApiIndex };
 
-startServer();
-
+if (shouldListen) {
+  startServer();
+}

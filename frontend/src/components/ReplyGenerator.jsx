@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { emailAPI } from '../services/api';
+import { useBilling } from '../context/BillingContext';
 
 const ReplyGenerator = ({ email, onClose, onSent }) => {
+  const { isPro, triggerUpgradeModal } = useBilling();
   const [tone, setTone] = useState('professional');
   const [intent, setIntent] = useState('general');
   const [generating, setGenerating] = useState(false);
@@ -14,6 +16,11 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
   const normalizeReply = (value = '') => String(value).replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
 
   const handleGenerateReply = async (selectedIntent = intent) => {
+    if (!isPro) {
+      triggerUpgradeModal('AI Reply Generator');
+      return;
+    }
+
     try {
       setGenerating(true);
       setStatus('');
@@ -25,8 +32,12 @@ const ReplyGenerator = ({ email, onClose, onSent }) => {
       setReply(generatedReply);
       setEditedReply(generatedReply);
     } catch (error) {
-      console.error('Reply generation error:', error);
-      setStatus('Reply draft could not be generated right now.');
+      if (error.response?.status === 403) {
+        triggerUpgradeModal('AI Reply Generator');
+      } else {
+        console.error('Reply generation error:', error);
+        setStatus('Reply draft could not be generated right now.');
+      }
     } finally {
       setGenerating(false);
     }

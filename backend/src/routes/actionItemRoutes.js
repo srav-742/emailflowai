@@ -7,15 +7,16 @@ const {
   deleteActionItem,
 } = require('../controllers/actionItemController');
 const { authenticate } = require('../middleware/auth');
+const { asyncHandler } = require('../utils/asyncHandler');
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/', getActionItems);
-router.post('/extract-batch', extractBatch);
-router.post('/:emailId/extract', extractFromEmail);
-router.patch('/:id', updateActionItem);
-router.delete('/:id', deleteActionItem);
+router.get('/', asyncHandler(getActionItems));
+router.post('/extract-batch', asyncHandler(extractBatch));
+router.post('/:emailId/extract', asyncHandler(extractFromEmail));
+router.patch('/:id', asyncHandler(updateActionItem));
+router.delete('/:id', asyncHandler(deleteActionItem));
 
 module.exports = router;

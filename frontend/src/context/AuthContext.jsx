@@ -2,6 +2,12 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authAPI } from '../services/api';
 import { auth, googleProvider, GoogleAuthProvider, signInWithPopup, signOut } from '../config/firebase';
+import {
+  GMAIL_RECONNECT_EVENT,
+  clearGmailReconnectState,
+  readStoredReconnectState,
+  setGmailReconnectState,
+} from '../utils/gmailReconnect';
 
 const AuthContext = createContext(null);
 
@@ -9,11 +15,29 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [token, setToken]     = useState(() => localStorage.getItem('token'));
+  const [gmailReconnectState, setLocalGmailReconnectState] = useState(() => (
+    typeof window !== 'undefined'
+      ? readStoredReconnectState()
+      : { required: false, message: '', email: null, source: null, timestamp: null }
+  ));
 
   const clearSession = useCallback(() => {
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
+    setLocalGmailReconnectState(clearGmailReconnectState());
+  }, []);
+
+  const markGmailReconnectRequired = useCallback((payload = {}) => {
+    const nextState = setGmailReconnectState(payload);
+    setLocalGmailReconnectState(nextState);
+    return nextState;
+  }, []);
+
+  const clearGmailReconnectRequired = useCallback(() => {
+    const nextState = clearGmailReconnectState();
+    setLocalGmailReconnectState(nextState);
+    return nextState;
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -26,6 +50,9 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await authAPI.getProfile();
       setUser(response.data.user);
+      if (response.data.user?.hasGmailAccess) {
+        clearGmailReconnectRequired();
+      }
     } catch (error) {
       const status = error?.response?.status;
       // 401 = invalid/expired token → clear session silently
@@ -38,7 +65,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [clearSession]);
+  }, [clearGmailReconnectRequired, clearSession]);
 
   // Load profile on mount and whenever token changes
   useEffect(() => {
@@ -48,6 +75,15 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     }
   }, [token, refreshProfile]);
+
+  useEffect(() => {
+    const handleReconnectEvent = (event) => {
+      setLocalGmailReconnectState(event?.detail || { required: false, message: '', email: null, source: null, timestamp: null });
+    };
+
+    window.addEventListener(GMAIL_RECONNECT_EVENT, handleReconnectEvent);
+    return () => window.removeEventListener(GMAIL_RECONNECT_EVENT, handleReconnectEvent);
+  }, []);
 
   const authenticateWithGoogle = useCallback(async () => {
     try {
@@ -63,6 +99,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', jwtToken);
       setToken(jwtToken);
       setUser(userData);
+      clearGmailReconnectRequired();
 
       return { success: true, user: userData };
     } catch (error) {
@@ -78,7 +115,7 @@ export const AuthProvider = ({ children }) => {
       }
       throw new Error(error?.message || 'Failed to sign in with Google. Please try again.');
     }
-  }, []);
+  }, [clearGmailReconnectRequired]);
 
   const loginWithGoogle   = useCallback(() => authenticateWithGoogle(), [authenticateWithGoogle]);
   const grantInboxAccess  = useCallback(() => authenticateWithGoogle(), [authenticateWithGoogle]);
@@ -96,7 +133,18 @@ export const AuthProvider = ({ children }) => {
   }, [clearSession]);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, loginWithGoogle, grantInboxAccess, logout, refreshProfile }}>
+    <AuthContext.Provider value={{
+      user,
+      token,
+      loading,
+      loginWithGoogle,
+      grantInboxAccess,
+      logout,
+      refreshProfile,
+      gmailReconnectState,
+      markGmailReconnectRequired,
+      clearGmailReconnectRequired,
+    }}>
       {children}
     </AuthContext.Provider>
   );

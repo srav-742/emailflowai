@@ -4,7 +4,7 @@ import { useBilling } from '../context/BillingContext';
 import ReplyGenerator from './ReplyGenerator';
 
 const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isThreadHead = false, isThreaded = false }) => {
-  const { triggerUpgradeModal } = useBilling();
+  const { isPro, triggerUpgradeModal } = useBilling();
   const [expanded, setExpanded] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [classifying, setClassifying] = useState(false);
@@ -40,6 +40,11 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
   };
 
   const handleAISummarize = async () => {
+    if (!isPro) {
+      triggerUpgradeModal('Deep AI Summaries');
+      return;
+    }
+
     try {
       setSummarizing(true);
       await emailAPI.aiSummarize(email.id);
@@ -56,6 +61,11 @@ const EmailCard = ({ email, onUpdate, compact = false, onThreadClick = null, isT
   };
 
   const handleAIClassify = async () => {
+    if (!isPro) {
+      triggerUpgradeModal('AI Classification');
+      return;
+    }
+
     try {
       setClassifying(true);
       await emailAPI.aiClassify(email.id);

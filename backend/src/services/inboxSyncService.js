@@ -89,12 +89,13 @@ async function ensureGmailConnection(userId, accountId = null, user = null) {
       select: {
         id: true,
         userId: true,
+        provider: true,
         accessToken: true,
         refreshToken: true,
       },
     });
 
-    if (account?.userId === userId && (account.accessToken || account.refreshToken)) {
+    if (account?.userId === userId && account.provider === 'google' && (account.accessToken || account.refreshToken)) {
       return resolvedUser;
     }
   } else {
@@ -102,6 +103,7 @@ async function ensureGmailConnection(userId, accountId = null, user = null) {
       prisma.emailAccount.findFirst({
         where: {
           userId,
+          provider: 'google',
           OR: [
             { accessToken: { not: null } },
             { refreshToken: { not: null } },

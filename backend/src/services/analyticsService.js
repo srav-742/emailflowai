@@ -142,10 +142,65 @@ async function getCategoryBreakdown(userId) {
   });
 }
 
+/**
+ * Track email processing stats.
+ */
+async function trackEmailProcessing(userId, count) {
+  try {
+    const timeSavedSeconds = count * 30; // 30 seconds per email
+    await prisma.userStats.upsert({
+      where: { userId },
+      update: {
+        emailsProcessed: { increment: count },
+        timeSaved: { increment: timeSavedSeconds }
+      },
+      create: {
+        userId,
+        emailsProcessed: count,
+        timeSaved: timeSavedSeconds
+      }
+    });
+    
+    await trackEvent(userId, 'email_processed', { count });
+  } catch (error) {
+    console.error('[Analytics] trackEmailProcessing failed:', error.message);
+  }
+}
+
+/**
+ * Track AI action stats.
+ */
+async function trackAIAction(userId, { aiActions = 1, timeSaved = 2 }) {
+  try {
+    const timeSavedSeconds = timeSaved * 60; // timeSaved usually passed as minutes
+    await prisma.userStats.upsert({
+      where: { userId },
+      update: {
+        aiActions: { increment: aiActions },
+        timeSaved: { increment: timeSavedSeconds }
+      },
+      create: {
+        userId,
+        aiActions,
+        timeSaved: timeSavedSeconds
+      }
+    });
+    
+    await trackEvent(userId, 'ai_action', { aiActions, timeSavedMinutes: timeSaved });
+  } catch (error) {
+    console.error('[Analytics] trackAIAction failed:', error.message);
+  }
+}
+
+const logAIUsage = trackAIAction;
+
 module.exports = {
   trackEvent,
   aggregateDailyStats,
   getSummary,
   getTopSenders,
-  getCategoryBreakdown
+  getCategoryBreakdown,
+  trackEmailProcessing,
+  trackAIAction,
+  logAIUsage
 };

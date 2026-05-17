@@ -1,6 +1,11 @@
 const { google } = require('googleapis');
 const prisma = require('../../config/database');
 const { decrypt, encrypt } = require('../../utils/encryption');
+const {
+  createReconnectError,
+  disableGoogleConnection,
+  isGoogleRefreshTokenInvalid,
+} = require('../../services/googleConnectionService');
 
 /**
  * Returns an authenticated Google OAuth2 client for a specific user and email.
@@ -20,7 +25,11 @@ async function getAuthClient(userId, email) {
   if (!tokenRecord) {
     // Fallback: Check if we have tokens in the legacy EmailAccount table
     const legacyAccount = await prisma.emailAccount.findFirst({
-      where: { userId, email }
+      where: {
+        userId,
+        email,
+        provider: 'google',
+      }
     });
 
     if (!legacyAccount || !legacyAccount.refreshToken) {
@@ -63,22 +72,65 @@ async function getAuthClient(userId, email) {
   if (isExpiringSoon) {
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
-      
-      await prisma.oAuthToken.update({
-        where: { id: tokenRecord.id },
-        data: {
-          accessToken: encrypt(credentials.access_token),
-          tokenExpiry: new Date(credentials.expiry_date),
-          updatedAt: new Date()
-        }
+
+      const nextAccessToken = credentials.access_token || accessToken;
+      const nextRefreshToken = credentials.refresh_token || refreshToken;
+      const nextTokenExpiry = credentials.expiry_date ? new Date(credentials.expiry_date) : tokenRecord.tokenExpiry;
+
+      await prisma.$transaction(async (tx) => {
+        await tx.oAuthToken.update({
+          where: { id: tokenRecord.id },
+          data: {
+            accessToken: encrypt(nextAccessToken),
+            refreshToken: encrypt(nextRefreshToken),
+            tokenExpiry: nextTokenExpiry,
+            updatedAt: new Date()
+          }
+        });
+
+        await tx.emailAccount.updateMany({
+          where: {
+            userId,
+            email,
+            provider: 'google',
+          },
+          data: {
+            accessToken: nextAccessToken,
+            refreshToken: nextRefreshToken,
+            tokenExpiry: nextTokenExpiry,
+            syncEnabled: true,
+          },
+        });
+
+        await tx.user.updateMany({
+          where: {
+            id: userId,
+            email,
+          },
+          data: {
+            accessToken: nextAccessToken,
+            refreshToken: nextRefreshToken,
+            tokenExpiry: nextTokenExpiry,
+            gmailConnectedAt: new Date(),
+          },
+        });
       });
 
       console.log(`[OAuth] Refreshed access token for ${email}`);
     } catch (error) {
       console.error(`[OAuth] Failed to refresh token for ${email}:`, error.message);
-      if (error.message.includes('invalid_grant') || error.message.includes('revoked')) {
+
+      if (isGoogleRefreshTokenInvalid(error)) {
+        try {
+          await disableGoogleConnection(userId, email);
+        } catch (disconnectError) {
+          console.error(`[OAuth] Failed to disable revoked Google connection for ${email}:`, disconnectError.message);
+        }
+
         console.warn(`[OAuth] Refresh token is invalid/revoked for ${email}. Re-auth required.`);
+        throw createReconnectError();
       }
+
       throw error;
     }
   }
@@ -91,8 +143,8 @@ async function getAuthClient(userId, email) {
  */
 async function migrateAndGetClient(userId, email, legacyAccount) {
   console.log(`[OAuth] Migrating tokens for ${email} to encrypted storage...`);
-  
-  const tokenRecord = await prisma.oAuthToken.create({
+
+  await prisma.oAuthToken.create({
     data: {
       userId,
       email,

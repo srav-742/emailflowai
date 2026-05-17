@@ -11,6 +11,9 @@ import EmailList from './pages/EmailList';
 import PricingPage from './pages/PricingPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import CalendarPage from './pages/CalendarPage';
+import SemanticSearchPage from './pages/SemanticSearchPage';
+import MemoryGraphPage from './pages/MemoryGraphPage';
+import AgentWorkflowsPage from './pages/AgentWorkflowsPage';
 import DigestSettings from './pages/Settings/DigestSettings';
 import AccountSettings from './pages/Settings/AccountSettings';
 import './index.css';
@@ -94,6 +97,9 @@ function App() {
           <Route path="waiting" element={<ErrorBoundary name="WaitingReply"><EmailList title="Waiting for Reply" description="Emails where you are expecting a response." filter={{ followUp: true }} /></ErrorBoundary>} />
           <Route path="calendar" element={<ErrorBoundary name="Calendar"><CalendarPage /></ErrorBoundary>} />
           <Route path="analytics" element={<ErrorBoundary name="Analytics"><AnalyticsPage /></ErrorBoundary>} />
+          <Route path="search" element={<ErrorBoundary name="SemanticSearch"><SemanticSearchPage /></ErrorBoundary>} />
+          <Route path="memory" element={<ErrorBoundary name="MemoryGraph"><MemoryGraphPage /></ErrorBoundary>} />
+          <Route path="workflows" element={<ErrorBoundary name="AgentWorkflows"><AgentWorkflowsPage /></ErrorBoundary>} />
           <Route path="settings/digest" element={<ErrorBoundary name="DigestSettings"><DigestSettings /></ErrorBoundary>} />
           <Route path="settings/accounts" element={<ErrorBoundary name="AccountSettings"><AccountSettings /></ErrorBoundary>} />
           <Route path="pricing" element={<ErrorBoundary name="Pricing"><PricingPage /></ErrorBoundary>} />

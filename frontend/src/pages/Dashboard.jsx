@@ -24,7 +24,7 @@ const mergeIncomingEmails = (currentEmails, incomingEmails) => {
 };
 
 const Dashboard = () => {
-  const { user, refreshProfile } = useAuth();
+  const { user, refreshProfile, gmailReconnectState } = useAuth();
   const navigate = useNavigate();
   const [emails, setEmails] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -174,7 +174,7 @@ const Dashboard = () => {
         }, 4000);
       }
     } catch {
-      setNotice({ tone: 'warn', text: 'Sync failed.' });
+      setNotice({ tone: 'warn', text: gmailReconnectState?.required ? 'Gmail needs to be reconnected before sync can continue.' : 'Sync failed.' });
     } finally {
       setSyncing(false);
     }
@@ -241,9 +241,9 @@ const Dashboard = () => {
         
         {currentStep < 3 && (
           <div className="surface-card" style={{ border: '1px solid var(--accent)', background: 'rgba(124,58,237,0.05)' }}>
-            <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Complete Your Setup</h2>
+               <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Complete Your Setup</h2>
             <div style={{ display: 'flex', gap: '1rem' }}>
-               {currentStep === 1 && <button className="button button-primary" onClick={() => navigate('/auth/gmail-connect')}>Connect Gmail</button>}
+               {currentStep === 1 && <button className="button button-primary" onClick={() => navigate(`/auth/gmail-connect${gmailReconnectState?.required ? '?mode=reconnect' : ''}`)}>{gmailReconnectState?.required ? 'Reconnect Gmail' : 'Connect Gmail'}</button>}
                {currentStep === 2 && <button className="button button-primary" onClick={handleSyncEmails} disabled={syncing}>Sync Inbox</button>}
             </div>
           </div>

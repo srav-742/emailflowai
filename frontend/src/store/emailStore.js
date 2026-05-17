@@ -12,10 +12,23 @@ export const useEmailStore = create((set) => ({
   error: null,
 
   setEmails: (newEmails) => set((state) => {
+    // If it's a function, call it with current state to get the new list.
+    // If it's an array, use it directly.
+    const nextEmails = typeof newEmails === 'function' ? newEmails(state.emails) : newEmails;
+    
+    if (!Array.isArray(nextEmails)) {
+      console.warn('[EmailStore] setEmails received non-array data:', nextEmails);
+      return state;
+    }
+
+    // Deduplicate by ID
     const merged = new Map();
-    // Maintain existing emails or prefer new ones? 
-    // Usually new ones have updated stats/summaries.
-    newEmails.forEach((email) => merged.set(email.id, email));
+    nextEmails.forEach((email) => {
+      if (email && email.id) {
+        merged.set(email.id, email);
+      }
+    });
+    
     return { emails: Array.from(merged.values()) };
   }),
 

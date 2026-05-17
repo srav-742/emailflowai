@@ -5,7 +5,7 @@ import { subscribeToPush, unsubscribeFromPush } from '../../utils/pushSubscribe'
 
 const AccountSettings = () => {
   const { accounts, updateAccountSettings, disconnectAccount } = useAccounts();
-  const { token } = useAuth();
+  const { token, gmailReconnectState } = useAuth();
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({});
   const [pushLoading, setPushLoading] = useState(false);
@@ -86,10 +86,21 @@ const AccountSettings = () => {
                     <p style={{ margin: '0.25rem 0', opacity: 0.7 }}>{account.email}</p>
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                       {account.isPrimary && <span className="status-pill status-ok">Primary</span>}
+                      {account.reconnectRequired ? <span className="status-pill status-warn">Reconnect Required</span> : null}
                       {account.syncEnabled ? <span className="status-pill">Sync On</span> : <span className="status-pill status-warn">Sync Off</span>}
                     </div>
+                    {account.reconnectRequired ? (
+                      <p style={{ marginTop: '0.75rem', color: 'var(--warning)', fontSize: '0.9rem' }}>
+                        Gmail access expired for this account. Reconnect to resume background sync and calendar updates.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="button-row">
+                    {account.reconnectRequired ? (
+                      <button className="button button-primary" onClick={() => window.location.href = '/auth/gmail-connect?mode=reconnect'}>
+                        Reconnect
+                      </button>
+                    ) : null}
                     <button className="button button-secondary" onClick={() => handleEdit(account)}>Edit</button>
                     <button className="button button-logout" onClick={() => disconnectAccount(account.id)}>Disconnect</button>
                   </div>
@@ -106,6 +117,16 @@ const AccountSettings = () => {
             Connect New Gmail Account
           </button>
         </div>
+
+        {gmailReconnectState?.required ? (
+          <div style={{ marginTop: '2rem', padding: '1.5rem', background: 'rgba(249, 115, 22, 0.08)', borderRadius: '12px', border: '1px solid rgba(249, 115, 22, 0.25)' }}>
+            <h3 style={{ marginTop: 0 }}>Recovery in progress</h3>
+            <p style={{ marginBottom: '1rem' }}>{gmailReconnectState.message}</p>
+            <button className="button button-primary" onClick={() => window.location.href = '/auth/gmail-connect?mode=reconnect'}>
+              Resume Gmail Recovery
+            </button>
+          </div>
+        ) : null}
 
         <div style={{ marginTop: '2rem', padding: '1.5rem', background: 'var(--panel-bg)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

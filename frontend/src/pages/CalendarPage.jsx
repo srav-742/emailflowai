@@ -1,40 +1,48 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useCallback } from 'react';
 import '../components/CalendarPage.css';
+import { calendarAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 const CalendarPage = () => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
+  const { markGmailReconnectRequired } = useAuth();
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await axios.get('/api/calendar/events?days=7', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await calendarAPI.getEvents(7);
       setEvents(response.data);
+      setError(null);
     } catch (err) {
-      setError('Failed to load calendar events. Please ensure you have connected your Google Calendar.');
+      const msg = err.response?.data?.error || err.message || 'Failed to load calendar events.';
+      if (/reconnect gmail|expired|revoked|no connected gmail/i.test(msg)) {
+        markGmailReconnectRequired({
+          message: 'Calendar sync is paused until Gmail is reconnected.',
+          source: 'calendar',
+        });
+      }
+      setError('Failed to load calendar events. Reconnect Gmail to restore calendar sync.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [markGmailReconnectRequired]);
 
   const handleSync = async () => {
     try {
       setSyncing(true);
-      const token = localStorage.getItem('token');
-      await axios.post('/api/calendar/sync', {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await calendarAPI.sync();
       await fetchEvents();
     } catch (err) {
-      const msg = err.response?.data?.error || err.message;
-      if (msg.toLowerCase().includes('scope') || msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('auth')) {
-        setError('Authorization Required. Please ensure you have granted calendar access by reconnecting your account.');
+      const msg = err.response?.data?.error || err.message || 'Calendar sync failed.';
+      if (msg.toLowerCase().includes('scope') || msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('auth') || msg.toLowerCase().includes('reconnect')) {
+        markGmailReconnectRequired({
+          message: 'Calendar authorization needs Gmail reconnection before sync can continue.',
+          source: 'calendar',
+        });
+        setError('Authorization required. Please reconnect Gmail to restore calendar access.');
       } else {
         setError(`Sync failed: ${msg}`);
       }
@@ -44,8 +52,8 @@ const CalendarPage = () => {
   };
 
   useEffect(() => {
-    fetchEvents();
-  }, []);
+    void fetchEvents();
+  }, [fetchEvents]);
 
   const formatTime = (dateStr) => {
     return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -55,7 +63,6 @@ const CalendarPage = () => {
     return new Date(dateStr).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   };
 
-  // Group events by date
   const groupedEvents = events.reduce((acc, event) => {
     const date = new Date(event.startTime).toDateString();
     if (!acc[date]) acc[date] = [];
@@ -71,8 +78,8 @@ const CalendarPage = () => {
           <h1>Google Calendar</h1>
           <p>Your upcoming meetings synced from Google Calendar.</p>
         </div>
-        <button 
-          className={`sync-btn ${syncing ? 'loading' : ''}`} 
+        <button
+          className={`sync-btn ${syncing ? 'loading' : ''}`}
           onClick={handleSync}
           disabled={syncing}
         >
@@ -87,16 +94,16 @@ const CalendarPage = () => {
         </div>
       ) : error ? (
         <div className="error-card">
-          <div className="error-icon">⚠️</div>
+          <div className="error-icon">Authorization</div>
           <div className="error-text">
-            <h3>Authorization Required</h3>
+            <h3>Calendar access paused</h3>
             <p>{error}</p>
-            <a href="/gmail-connect" className="reconnect-link">Reconnect Google Account</a>
+            <a href="/auth/gmail-connect?mode=reconnect" className="reconnect-link">Reconnect Google Account</a>
           </div>
         </div>
       ) : Object.keys(groupedEvents).length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">📅</div>
+          <div className="empty-icon">Calendar</div>
           <h3>No upcoming meetings</h3>
           <p>Your calendar looks clear for the next 7 days.</p>
         </div>
@@ -114,17 +121,17 @@ const CalendarPage = () => {
                     </div>
                     <div className="event-info">
                       <h3 className="event-title">{event.title}</h3>
-                      {event.description && <p className="event-desc">{event.description.substring(0, 100)}...</p>}
-                      {event.meetingLink && (
-                        <a 
-                          href={event.meetingLink} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
+                      {event.description ? <p className="event-desc">{event.description.substring(0, 100)}...</p> : null}
+                      {event.meetingLink ? (
+                        <a
+                          href={event.meetingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="meeting-link"
                         >
                           Join Meeting
                         </a>
-                      )}
+                      ) : null}
                     </div>
                     <div className="event-status">
                       <span className="status-dot active"></span>

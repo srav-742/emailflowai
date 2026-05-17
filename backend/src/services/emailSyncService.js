@@ -22,12 +22,31 @@ async function pollInbox(io) {
         OR: [
           { accessToken: { not: null } },
           { refreshToken: { not: null } },
+          {
+            emailAccounts: {
+              some: {
+                provider: 'google',
+                syncEnabled: true,
+                OR: [
+                  { accessToken: { not: null } },
+                  { refreshToken: { not: null } },
+                ],
+              },
+            },
+          },
+          {
+            oauthTokens: {
+              some: {},
+            },
+          },
         ],
       },
       select: {
         id: true,
         email: true,
         importantContacts: true,
+        accessToken: true,
+        refreshToken: true,
       },
     });
 
@@ -37,21 +56,41 @@ async function pollInbox(io) {
       try {
         // Fetch all connected email accounts for this user
         const accounts = await prisma.emailAccount.findMany({
+          where: {
+            userId: user.id,
+            provider: 'google',
+            syncEnabled: true,
+            OR: [
+              { accessToken: { not: null } },
+              { refreshToken: { not: null } },
+            ],
+          },
+          select: { id: true, email: true, isPrimary: true },
+          orderBy: [
+            { isPrimary: 'desc' },
+            { createdAt: 'asc' },
+          ],
+        });
+        const oauthTokens = await prisma.oAuthToken.findMany({
           where: { userId: user.id },
-          select: { id: true, email: true }
+          select: { email: true },
         });
-
-        // Also check the legacy user account (compatibility)
-        const legacyUser = await prisma.user.findUnique({
-          where: { id: user.id },
-          select: { accessToken: true, refreshToken: true }
-        });
+        const oauthTokenEmails = new Set(oauthTokens.map((token) => token.email));
+        const hasLegacyTokens = Boolean(user.accessToken || user.refreshToken);
+        const hasPrimaryAccount = accounts.some((account) => account.email === user.email);
+        const shouldSyncDefaultConnection = accounts.length === 0
+          ? (hasLegacyTokens || oauthTokenEmails.size > 0)
+          : (!hasPrimaryAccount && (hasLegacyTokens || oauthTokenEmails.has(user.email)));
 
         // Sync legacy account if it has tokens
-        console.log(`[Sync] Checking legacy tokens for ${user.email}:`, { hasAccess: !!legacyUser?.accessToken, hasRefresh: !!legacyUser?.refreshToken });
-        if (legacyUser?.accessToken || legacyUser?.refreshToken) {
+        console.log(`[Sync] Checking default Google connection for ${user.email}:`, {
+          hasLegacyTokens,
+          hasPrimaryOauthToken: oauthTokenEmails.has(user.email),
+          hasActiveAccounts: accounts.length > 0,
+        });
+        if (shouldSyncDefaultConnection) {
           console.log(`[Sync] Triggering legacy sync for ${user.email}`);
-          await syncAndNotify(io, user, null); 
+          await syncAndNotify(io, user, null);
         }
 
         // Sync all new-style accounts

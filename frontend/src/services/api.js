@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearGmailReconnectState, isGmailReconnectError, setGmailReconnectState } from '../utils/gmailReconnect';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -17,6 +18,26 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => {
+    if (response?.config?.url === '/auth/profile' && response?.data?.user?.hasGmailAccess) {
+      clearGmailReconnectState();
+    }
+
+    return response;
+  },
+  (error) => {
+    if (isGmailReconnectError(error)) {
+      setGmailReconnectState({
+        message: error?.response?.data?.error || error?.message || 'Google access needs to be reconnected.',
+        source: error?.config?.url || 'api',
+      });
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 // Auth APIs
 export const authAPI = {
@@ -44,7 +65,7 @@ export const emailAPI = {
 
   aiSummarize: (id) => api.post(`/emails/ai/${id}/summarize`),
   aiClassify: (id) => api.post(`/emails/ai/${id}/classify`),
-  aiGenerateReply: (id, tone = 'professional') => api.post(`/emails/ai/${id}/reply`, { tone }),
+  aiGenerateReply: (id, tone = 'professional', intent = 'general') => api.post(`/emails/ai/${id}/reply`, { tone, intent }),
   aiProcessAll: () => api.post('/emails/ai/process-all'),
   getCategoryCounts: () => api.get('/emails/counts'),
   updateEmailCategory: (id, category) => api.patch(`/emails/${id}/category`, { category }),
@@ -95,6 +116,12 @@ export const accountAPI = {
   list: () => api.get('/accounts'),
   update: (id, data) => api.patch(`/accounts/${id}`, data),
   disconnect: (id) => api.delete(`/accounts/${id}`),
+};
+
+export const semanticAPI = {
+  status: () => api.get('/semantic/status'),
+  index: (data = {}) => api.post('/semantic/index', data),
+  search: (params = {}) => api.get('/semantic/search', { params }),
 };
 
 export default api;

@@ -5,8 +5,11 @@ const { getUserInfo } = require('../utils/gmailOAuth');
 const { encrypt } = require('../utils/encryption');
 const { msalClient } = require('../config/msalConfig');
 const { syncOutlookEmails } = require('../services/outlookSyncService');
+const { hasGoogleConnection } = require('../services/googleConnectionService');
 
-function serializeUser(user) {
+async function serializeUser(user, options = {}) {
+  const hasGmailAccess = options.hasGmailAccess ?? await hasGoogleConnection(user.id, user);
+
   return {
     id: user.id,
     email: user.email,
@@ -17,7 +20,7 @@ function serializeUser(user) {
     style: user.style || null,
     importantContacts: Array.isArray(user.importantContacts) ? user.importantContacts : [],
     createdAt: user.createdAt,
-    hasGmailAccess: Boolean(user.refreshToken || user.accessToken),
+    hasGmailAccess,
     gmailConnectedAt: user.gmailConnectedAt,
     lastSyncAt: user.lastSyncAt,
   };
@@ -67,14 +70,79 @@ async function persistGmailTokens(userId, tokens) {
   // Get email for this token set
   const userInfo = await getUserInfo(tokens);
   const accountEmail = userInfo.email;
+  const isPrimaryIdentity = existingUser.email === accountEmail;
+
+  const [existingEmailAccount, existingOAuthToken] = await Promise.all([
+    prisma.emailAccount.findUnique({
+      where: {
+        provider_email: {
+          provider: 'google',
+          email: accountEmail,
+        },
+      },
+      select: {
+        accessToken: true,
+        refreshToken: true,
+        tokenExpiry: true,
+      },
+    }),
+    prisma.oAuthToken.findUnique({
+      where: {
+        userId_email: {
+          userId,
+          email: accountEmail,
+        },
+      },
+      select: {
+        accessToken: true,
+        refreshToken: true,
+        tokenExpiry: true,
+      },
+    }),
+  ]);
+
+  const nextAccessToken =
+    tokens.access_token ??
+    existingEmailAccount?.accessToken ??
+    (isPrimaryIdentity ? existingUser.accessToken : null);
+  const nextRefreshToken =
+    tokens.refresh_token ??
+    existingEmailAccount?.refreshToken ??
+    (isPrimaryIdentity ? existingUser.refreshToken : null);
+  const nextEncryptedAccessToken =
+    (nextAccessToken ? encrypt(nextAccessToken) : null) ??
+    existingOAuthToken?.accessToken ??
+    null;
+  const nextEncryptedRefreshToken =
+    (tokens.refresh_token ? encrypt(tokens.refresh_token) : null) ??
+    existingOAuthToken?.refreshToken ??
+    (isPrimaryIdentity && existingUser.refreshToken ? encrypt(existingUser.refreshToken) : null);
+  const nextTokenExpiry =
+    (tokens.expiry_date ? new Date(tokens.expiry_date) : null) ??
+    existingEmailAccount?.tokenExpiry ??
+    existingOAuthToken?.tokenExpiry ??
+    existingUser.tokenExpiry ??
+    new Date(Date.now() + 3600 * 1000);
+
+  if (!nextAccessToken || !nextEncryptedAccessToken) {
+    throw new Error('Google did not return an access token. Please reconnect Gmail.');
+  }
+
+  if (!nextRefreshToken || !nextEncryptedRefreshToken) {
+    throw new Error('Google did not return a refresh token. Reconnect Gmail and approve offline access.');
+  }
 
   // 1. Update the main user record (for legacy compatibility and primary identity)
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: {
-      accessToken: tokens.access_token ?? existingUser.accessToken,
-      refreshToken: tokens.refresh_token ?? existingUser.refreshToken,
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : existingUser.tokenExpiry,
+      ...(isPrimaryIdentity
+        ? {
+            accessToken: nextAccessToken,
+            refreshToken: nextRefreshToken,
+            tokenExpiry: nextTokenExpiry,
+          }
+        : {}),
       gmailConnectedAt: new Date(),
     },
   });
@@ -89,20 +157,22 @@ async function persistGmailTokens(userId, tokens) {
     },
     update: {
       userId,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+      accessToken: nextAccessToken,
+      refreshToken: nextRefreshToken,
+      tokenExpiry: nextTokenExpiry,
       displayName: userInfo.name || accountEmail.split('@')[0],
+      syncEnabled: true,
     },
     create: {
       userId,
       provider: 'google',
       email: accountEmail,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+      accessToken: nextAccessToken,
+      refreshToken: nextRefreshToken,
+      tokenExpiry: nextTokenExpiry,
       displayName: userInfo.name || accountEmail.split('@')[0],
       isPrimary: accountEmail === updatedUser.email,
+      syncEnabled: true,
     },
   });
 
@@ -115,17 +185,17 @@ async function persistGmailTokens(userId, tokens) {
       },
     },
     update: {
-      accessToken: encrypt(tokens.access_token),
-      refreshToken: encrypt(tokens.refresh_token),
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+      accessToken: nextEncryptedAccessToken,
+      refreshToken: nextEncryptedRefreshToken,
+      tokenExpiry: nextTokenExpiry,
       updatedAt: new Date(),
     },
     create: {
       userId,
       email: accountEmail,
-      accessToken: encrypt(tokens.access_token),
-      refreshToken: encrypt(tokens.refresh_token),
-      tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600 * 1000),
+      accessToken: nextEncryptedAccessToken,
+      refreshToken: nextEncryptedRefreshToken,
+      tokenExpiry: nextTokenExpiry,
       scope: tokens.scope || [
         'https://www.googleapis.com/auth/gmail.readonly',
         'https://www.googleapis.com/auth/gmail.modify',
@@ -200,7 +270,7 @@ const firebaseGoogleLogin = async (req, res) => {
 
     res.json({
       token: jwtToken,
-      user: serializeUser(user),
+      user: await serializeUser(user),
     });
   } catch (error) {
     console.error('Auth Error:', error);
@@ -222,7 +292,7 @@ const saveGmailTokens = async (req, res) => {
 
     res.json({
       message: 'Gmail connected successfully',
-      user: serializeUser(user),
+      user: await serializeUser(user, { hasGmailAccess: true }),
     });
   } catch (error) {
     console.error('Save Gmail tokens error:', error);
@@ -255,7 +325,7 @@ const getProfile = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user: serializeUser(user) });
+    res.json({ user: await serializeUser(user) });
   } catch (error) {
     console.error('Get profile error:', error);
     return sendAuthError(res, error, 'Failed to fetch profile');

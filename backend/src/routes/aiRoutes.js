@@ -8,17 +8,18 @@ const {
   getInboxSummary,
 } = require('../controllers/aiController');
 const { authenticate } = require('../middleware/auth');
+const { asyncHandler } = require('../utils/asyncHandler');
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/morning-brief', morningBrief);
-router.get('/analytics', getAnalyticsSummary);
-router.get('/inbox-summary', getInboxSummary);
-router.post('/style/train', trainStyle);
-router.post('/train-style', trainStyle);
-router.put('/preferences', updatePreferences);
-router.get('/accounts', listAccounts);
+router.get('/morning-brief', asyncHandler(morningBrief));
+router.get('/analytics', asyncHandler(getAnalyticsSummary));
+router.get('/inbox-summary', asyncHandler(getInboxSummary));
+router.post('/style/train', asyncHandler(trainStyle));
+router.post('/train-style', asyncHandler(trainStyle));
+router.put('/preferences', asyncHandler(updatePreferences));
+router.get('/accounts', asyncHandler(listAccounts));
 
 module.exports = router;

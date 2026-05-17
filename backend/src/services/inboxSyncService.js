@@ -10,6 +10,9 @@ const { detectAndCreateFollowUp, resolveFollowUpIfReplied } = require('./followU
 const { categorizeEmailsBatch } = require('../lib/ai/categorizeEmail');
 const { saveAttachment } = require('./attachmentService');
 const { scoreEmailPriority } = require('./priorityService');
+const { indexEmail } = require('./semanticSearchService');
+const { buildMemoryGraph } = require('./memoryService');
+const { detectWorkflow } = require('./agentOrchestrator');
 
 const activeSyncs = new Map();
 
@@ -521,6 +524,15 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
         });
 
         syncedEmails.push(result.email);
+
+        void Promise.allSettled([
+          indexEmail(result.email),
+          buildMemoryGraph(result.email),
+          detectWorkflow(result.email),
+        ]).catch((stage3Error) => {
+          console.error('[Stage3] Background processing failed:', stage3Error.message || stage3Error);
+        });
+
         if (result.isNew) {
           newEmails.push(result.email);
           const { trackEvent } = require('./analyticsService');

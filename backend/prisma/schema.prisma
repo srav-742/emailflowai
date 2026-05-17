@@ -158,6 +158,7 @@ model Email {
   thread           Thread?                  @relation(fields: [threadId], references: [id])
   user             User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   followUps        FollowUp[]
+  embedding        EmailEmbedding?
   semanticIndex    SemanticEmailIndex?
   agentWorkflowApprovals AgentWorkflowApproval[]
 
@@ -455,6 +456,54 @@ model SemanticEmailIndex {
 
   @@index([userId, indexedAt(sort: Desc)])
   @@map("semantic_email_index")
+}
+
+model EmailEmbedding {
+  id            String   @id @default(uuid())
+  emailId       String   @unique @map("email_id")
+  subjectVector Json     @map("subject_vector")
+  bodyVector    Json     @map("body_vector")
+  threadVector  Json     @map("thread_vector")
+  createdAt     DateTime @default(now()) @map("created_at")
+  email         Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@map("email_embeddings")
+}
+
+model MemoryNode {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, type])
+  @@map("memory_nodes")
+}
+
+model MemoryRelation {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  sourceId     String   @map("source_id")
+  targetId     String   @map("target_id")
+  relationType String   @map("relation_type")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId, relationType])
+  @@map("memory_relations")
+}
+
+model AgentWorkflowApproval {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  type        String
+  status      String
+  explanation String
+  payload     Json
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId, status])
+  @@map("agent_workflow_approvals")
 }
 
 model MemoryNode {

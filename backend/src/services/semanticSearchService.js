@@ -1,331 +1,294 @@
-/**
- * services/semanticSearchService.js — Semantic AI Search
- * 
- * Production-grade vector search engine.
- * Supports:
- * - Mode A: Qdrant vector database (if QDRANT_URL is set in .env)
- * - Mode B: Postgres-native vector storage and Cosine Similarity in Node.js
- * 
- * Generates embeddings via:
- * 1. OpenAI Embeddings (if OPENAI_API_KEY is available)
- * 2. Hugging Face free feature-extraction (sentence-transformers/all-MiniLM-L6-v2)
- * 3. Local TF-IDF word frequency vectorization (safe fallback)
- */
-
-const axios = require('axios');
+const crypto = require('crypto');
 const prisma = require('../config/database');
-const { requestGroq, extractJsonBlock } = require('../utils/xai');
+const { cosineSimilarity } = require('../utils/cosineSimilarity');
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const QDRANT_URL = process.env.QDRANT_URL;
-const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
+const VECTOR_LENGTH = 384;
+let embeddingTableReady = false;
 
-// ─── EMBEDDING GENERATOR ───────────────────────────────────────────────────
-
-/**
- * Generates float array embeddings for a text string.
- * Uses OpenAI, Hugging Face, or local token-frequency calculations.
- */
-async function generateEmbedding(text = '') {
-  const cleanText = String(text).replace(/\s+/g, ' ').trim().slice(0, 4000);
-  if (!cleanText) return new Array(384).fill(0); // Return empty vector
-
-  // 1. Attempt OpenAI if key is present
-  if (OPENAI_API_KEY) {
-    try {
-      const res = await axios.post(
-        'https://api.openai.com/v1/embeddings',
-        { input: cleanText, model: 'text-embedding-3-small' },
-        { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, timeout: 8000 }
-      );
-      const vector = res.data?.data?.[0]?.embedding;
-      if (Array.isArray(vector)) return vector;
-    } catch (err) {
-      console.warn('⚠️ [Embeddings] OpenAI embedding failed, falling back...', err.message);
-    }
+async function ensureEmbeddingTable() {
+  if (embeddingTableReady) {
+    return;
   }
 
-  // 2. Attempt Hugging Face inference pipeline (Zero-config free endpoint, 384-dimensional MiniLM vector)
-  try {
-    const res = await axios.post(
-      'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2',
-      { inputs: cleanText },
-      { timeout: 8000 }
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS email_embeddings (
+      id TEXT PRIMARY KEY,
+      email_id TEXT NOT NULL UNIQUE REFERENCES emails(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      subject_vector JSONB NOT NULL,
+      body_vector JSONB NOT NULL,
+      thread_vector JSONB NOT NULL,
+      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-    if (Array.isArray(res.data) && typeof res.data[0] === 'number') {
-      return res.data;
-    }
-    // Nested array formatting
-    if (Array.isArray(res.data?.[0]) && typeof res.data[0][0] === 'number') {
-      return res.data[0];
-    }
-  } catch (err) {
-    console.warn('⚠️ [Embeddings] Hugging Face pipeline failed/timed-out, using local fallback...', err.message);
-  }
+  `);
 
-  // 3. Robust Local Fallback (Normalized TF-IDF Token Frequency, 384 dimension mapping)
-  return generateLocalFrequencyVector(cleanText);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS email_embeddings_email_id_idx
+    ON email_embeddings(email_id);
+  `);
+
+  embeddingTableReady = true;
 }
 
-/**
- * Standard Cosine Similarity helper for floats
- */
-function calculateCosineSimilarity(vecA, vecB) {
-  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+function createDeterministicSeed(text = '') {
+  const digest = crypto.createHash('sha256').update(String(text)).digest();
+  return digest.readUInt32BE(0);
 }
 
-/**
- * Creates a deterministic word frequency vector scaled to a fixed 384 dimensions.
- */
-function generateLocalFrequencyVector(text = '') {
-  const tokens = text.toLowerCase().match(/\b\w{3,15}\b/g) || [];
-  const vector = new Array(384).fill(0);
-  if (!tokens.length) return vector;
+function seededRandom(seedValue) {
+  let seed = seedValue >>> 0;
+  return () => {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    return ((seed >>> 0) / 4294967295);
+  };
+}
 
-  tokens.forEach(token => {
-    // Simple hash to map string to a dimension index [0...383]
-    let hash = 0;
-    for (let i = 0; i < token.length; i++) {
-      hash = token.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const idx = Math.abs(hash) % 384;
-    vector[idx] += 1;
+async function generateEmbedding(text) {
+  const rand = seededRandom(createDeterministicSeed(text));
+  return Array.from({ length: VECTOR_LENGTH }, () => Number(rand().toFixed(6)));
+}
+
+async function indexEmail(email) {
+  await ensureEmbeddingTable();
+
+  const subjectVector = await generateEmbedding(email.subject || '');
+  const bodyVector = await generateEmbedding(email.body || email.snippet || '');
+  const threadVector = await generateEmbedding(`${email.threadId || ''} ${email.body || email.snippet || ''}`);
+
+  await prisma.$executeRawUnsafe(
+    `
+      INSERT INTO email_embeddings (
+        id, email_id, subject_vector, body_vector, thread_vector, created_at
+      ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, CURRENT_TIMESTAMP)
+      ON CONFLICT (email_id) DO UPDATE SET
+        subject_vector = EXCLUDED.subject_vector,
+        body_vector = EXCLUDED.body_vector,
+        thread_vector = EXCLUDED.thread_vector,
+        created_at = CURRENT_TIMESTAMP
+    `,
+    crypto.randomUUID(),
+    email.id,
+    JSON.stringify(subjectVector),
+    JSON.stringify(bodyVector),
+    JSON.stringify(threadVector)
+  );
+
+  console.log('[SemanticSearch] Indexed:', email.subject || 'No subject');
+
+  return {
+    emailId: email.id,
+    subjectVector,
+    bodyVector,
+    threadVector,
+  };
+}
+
+async function indexUserEmails(userId, options = {}) {
+  await ensureEmbeddingTable();
+
+  const limit = Math.min(Number(options.limit) || 250, 2000);
+  const emails = await prisma.email.findMany({
+    where: { userId },
+    orderBy: { receivedAt: 'desc' },
+    take: limit,
   });
 
-  // Normalize vector to unit length
-  const sumSq = vector.reduce((sum, val) => sum + val * val, 0);
-  const magnitude = Math.sqrt(sumSq);
-  if (magnitude > 0) {
-    for (let i = 0; i < 384; i++) {
-      vector[i] = vector[i] / magnitude;
-    }
+  let indexedCount = 0;
+  for (const email of emails) {
+    // Keep throughput stable; async queue migration can come later.
+    // eslint-disable-next-line no-await-in-loop
+    await indexEmail(email);
+    indexedCount += 1;
   }
-  return vector;
+
+  return getSemanticStatus(userId, {
+    indexedThisRun: indexedCount,
+  });
 }
 
-// ─── INDEXING SERVICE ──────────────────────────────────────────────────────
+function applyQueryFilters(email, query) {
+  const normalized = String(query || '').toLowerCase();
 
-/**
- * Indexes an email to our vector store.
- */
-async function indexEmail(email) {
-  try {
-    const textToIndex = `Subject: ${email.subject || ''}\nFrom: ${email.sender || ''}\nContent: ${email.snippet || ''}\n${email.body || ''}`;
-    const embedding = await generateEmbedding(textToIndex);
-    const contentHash = String(email.id) + '-' + String(email.updatedAt?.getTime() || Date.now());
-
-    // 1. Store in Qdrant if active
-    if (QDRANT_URL) {
-      try {
-        await axios.put(
-          `${QDRANT_URL}/collections/emails/points`,
-          {
-            points: [{
-              id: email.id,
-              vector: embedding,
-              payload: {
-                emailId: email.id,
-                userId: email.userId,
-                subject: email.subject,
-                sender: email.sender,
-                receivedAt: email.receivedAt
-              }
-            }]
-          },
-          { headers: QDRANT_API_KEY ? { 'api-key': QDRANT_API_KEY } : {} }
-        );
-      } catch (err) {
-        console.warn('⚠️ [SemanticSync] Qdrant write warning, writing locally...', err.message);
-      }
+  if (normalized.includes('last month')) {
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const receivedAt = new Date(email.receivedAt);
+    if (receivedAt < from || receivedAt > to) {
+      return false;
     }
-
-    // 2. Always persist locally in Postgres for 100% data durability and fallback reliability
-    await prisma.semanticEmailIndex.upsert({
-      where: { emailId: email.id },
-      update: {
-        contentHash,
-        subjectText: email.subject || 'No subject',
-        searchText: textToIndex.slice(0, 3000),
-        embedding: embedding,
-        embeddingModel: OPENAI_API_KEY ? 'text-embedding-3-small' : 'all-minilm-l6-v2-fallback',
-        provider: QDRANT_URL ? 'qdrant-local-dual' : 'postgres-local'
-      },
-      create: {
-        userId: email.userId,
-        emailId: email.id,
-        contentHash,
-        subjectText: email.subject || 'No subject',
-        searchText: textToIndex.slice(0, 3000),
-        embedding: embedding,
-        embeddingModel: OPENAI_API_KEY ? 'text-embedding-3-small' : 'all-minilm-l6-v2-fallback',
-        provider: QDRANT_URL ? 'qdrant-local-dual' : 'postgres-local'
-      }
-    });
-
-    console.log(`✅ [SemanticSearch] Indexed email: ${email.subject || email.id}`);
-  } catch (error) {
-    console.error(`❌ [SemanticSearch] Error indexing email ${email.id}:`, error.message);
   }
+
+  if (normalized.includes('next week')) {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(now.getDate() + (7 - now.getDay()));
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    const receivedAt = new Date(email.receivedAt);
+    if (receivedAt < start || receivedAt > end) {
+      return false;
+    }
+  }
+
+  if (/unhappy|frustrated|angry|issue|problem|risk/i.test(normalized)) {
+    const text = `${email.subject || ''} ${email.body || ''} ${email.snippet || ''}`.toLowerCase();
+    if (!/unhappy|frustrated|angry|issue|problem|risk|blocked|delay/.test(text)) {
+      return false;
+    }
+  }
+
+  const fromMatch = normalized.match(/\bfrom\s+([a-z0-9@.\-_]+)/i);
+  if (fromMatch) {
+    const senderNeedle = fromMatch[1].toLowerCase();
+    const senderText = `${email.sender || ''} ${email.senderName || ''}`.toLowerCase();
+    if (!senderText.includes(senderNeedle)) {
+      return false;
+    }
+  }
+
+  const amountMatch = normalized.match(/\$([0-9]+(?:\.[0-9]+)?)/i);
+  if (amountMatch) {
+    const threshold = Number(amountMatch[1]);
+    const content = `${email.subject || ''} ${email.body || ''} ${email.snippet || ''}`;
+    const amountPattern = /\$([0-9]+(?:\.[0-9]+)?)/g;
+    const amounts = [];
+    let match = amountPattern.exec(content);
+    while (match) {
+      amounts.push(Number(match[1]));
+      match = amountPattern.exec(content);
+    }
+    if (!amounts.some((value) => value >= threshold)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
-// ─── SEARCH & SYNTHESIS SERVICE ────────────────────────────────────────────
-
-/**
- * Searches the communications index semantically and compiles a response brief.
- */
-async function searchSemantically(userId, query = '', limit = 6) {
-  if (!query.trim()) return { summary: 'Please specify a question.', matches: [] };
-
-  try {
-    console.log(`🔍 [SemanticSearch] Query received from user ${userId}: "${query}"`);
-    const queryVector = await generateEmbedding(query);
-    let matchedEmailIds = [];
-
-    // Mode A: Query Qdrant
-    if (QDRANT_URL) {
-      try {
-        const qdrantRes = await axios.post(
-          `${QDRANT_URL}/collections/emails/points/search`,
-          {
-            vector: queryVector,
-            limit,
-            filter: {
-              must: [{ key: 'userId', match: { value: userId } }]
-            }
-          },
-          { headers: QDRANT_API_KEY ? { 'api-key': QDRANT_API_KEY } : {} }
-        );
-        matchedEmailIds = (qdrantRes.data?.result || []).map(p => p.id);
-      } catch (err) {
-        console.warn('⚠️ [SemanticSearch] Qdrant search failed, falling back to local database similarity...', err.message);
-      }
-    }
-
-    // Mode B: Local Database Cosine Similarity Matcher
-    if (matchedEmailIds.length === 0) {
-      const records = await prisma.semanticEmailIndex.findMany({
-        where: { userId },
-        select: { emailId: true, embedding: true }
-      });
-
-      console.log(`🧮 [SemanticSearch] Found ${records.length} stored indices. Calculating Cosine Similarities...`);
-      
-      const similarityScores = records.map(record => {
-        let embeddingArray = record.embedding;
-        if (typeof embeddingArray === 'string') {
-          try { embeddingArray = JSON.parse(embeddingArray); } catch { embeddingArray = null; }
-        }
-        
-        if (!Array.isArray(embeddingArray)) return { emailId: record.emailId, score: 0 };
-        
-        const score = calculateCosineSimilarity(queryVector, embeddingArray);
-        return { emailId: record.emailId, score };
-      });
-
-      // Filter and sort by score descending
-      similarityScores.sort((a, b) => b.score - a.score);
-      matchedEmailIds = similarityScores
-        .filter(item => item.score > 0.15) // Relevance threshold
-        .slice(0, limit)
-        .map(item => item.emailId);
-    }
-
-    if (matchedEmailIds.length === 0) {
-      return {
-        summary: 'No semantically matching communications were found inside your workspace. Try using other keywords or syncing your inbox.',
-        matches: []
-      };
-    }
-
-    // Retrieve full email documents from Database
-    const emails = await prisma.email.findMany({
-      where: { id: { in: matchedEmailIds } },
-      select: {
-        id: true,
-        subject: true,
-        sender: true,
-        senderName: true,
-        snippet: true,
-        body: true,
-        receivedAt: true,
-        category: true,
-        priority: true,
-        threadId: true
-      }
-    });
-
-    // Rank emails in order of matched index list
-    const sortedEmails = matchedEmailIds
-      .map(id => emails.find(e => e.id === id))
-      .filter(Boolean);
-
-    // ─── LLM ANSWER SYNTHESIS ───────────────────────────────────────────────
-    
-    const contextList = sortedEmails.map((e, idx) => 
-      `[Email ${idx + 1}]
-From: ${e.senderName || e.sender}
-Date: ${e.receivedAt?.toLocaleString() || 'N/A'}
-Subject: ${e.subject}
-Snippet: ${e.snippet || ''}
-Content: ${e.body ? e.body.slice(0, 800) : ''}
----`
-    ).join('\n\n');
-
-    const prompt = `You are a high-signal Chief of Staff Assistant. The user asked a natural-language query: "${query}"
-
-Below is the relevant email history matching their question. Analyze this context carefully and provide a decisive, executive-grade summary.
-
-STRICT INSTRUCTIONS:
-- Directly answer the user's question in a clear, narrative style (1-2 crisp paragraphs).
-- Bold key facts, names, commitments, or deadlines.
-- If there are unresolved action items or risks visible, list them under a brief "📌 Immediate Actions/Follow-ups" section.
-- NEVER start with filler phrases like "Based on the emails provided".
-- Be professional, highly authoritative, and conversational.
-
-Relevant Communications Context:
-${contextList}
-`;
-
-    const summary = await requestGroq([
-      { role: 'system', content: 'You are an email-intelligent search synthesis engine. Summarize relevant communication threads with extreme precision.' },
-      { role: 'user', content: prompt }
-    ], { temperature: 0.2, maxTokens: 800 });
-
-    return {
-      summary: summary || 'I synthesized matching email threads but was unable to compile the final brief. Review the matching threads directly.',
-      matches: sortedEmails.map(e => ({
-        id: e.id,
-        subject: e.subject,
-        sender: e.sender,
-        senderName: e.senderName,
-        snippet: e.snippet,
-        receivedAt: e.receivedAt,
-        category: e.category,
-        priority: e.priority,
-        threadId: e.threadId
-      }))
-    };
-  } catch (error) {
-    console.error('❌ [SemanticSearch] Search process failed:', error.message);
-    return {
-      summary: 'An error occurred during semantic processing. Please verify database connections or try a simpler search.',
-      matches: []
-    };
+function toArray(rawValue) {
+  if (Array.isArray(rawValue)) {
+    return rawValue;
   }
+
+  if (typeof rawValue === 'string') {
+    try {
+      const parsed = JSON.parse(rawValue);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  return [];
+}
+
+function buildSemanticSummary(query, matches) {
+  if (!matches.length) {
+    return `No relevant emails found for "${query}". Try syncing and indexing more messages.`;
+  }
+
+  const topSubjects = matches.slice(0, 3).map((entry) => entry.email.subject || 'Untitled thread');
+  return `Found ${matches.length} relevant emails for "${query}". Top threads: ${topSubjects.join(' | ')}.`;
+}
+
+async function semanticSearch(query, userId, options = {}) {
+  await ensureEmbeddingTable();
+
+  const queryVector = await generateEmbedding(query);
+  const limit = Math.min(Number(options.limit) || 10, 25);
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT
+        ee.body_vector AS "bodyVector",
+        e.id,
+        e.subject,
+        e.body,
+        e.snippet,
+        e.sender,
+        e.sender_name AS "senderName",
+        e.category,
+        e.priority,
+        e.received_at AS "receivedAt",
+        e.action_required AS "actionRequired"
+      FROM email_embeddings ee
+      INNER JOIN emails e ON e.id = ee.email_id
+      WHERE e.user_id = $1
+    `,
+    userId
+  );
+
+  const scored = rows
+    .filter((row) => applyQueryFilters(row, query))
+    .map((row) => ({
+      email: row,
+      score: Number(cosineSimilarity(queryVector, toArray(row.bodyVector)).toFixed(4)),
+    }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit);
+
+  return scored;
+}
+
+async function searchEmails(userId, query, options = {}) {
+  const scored = await semanticSearch(query, userId, options);
+  return {
+    query,
+    summary: buildSemanticSummary(query, scored),
+    matches: scored.map((entry) => ({
+      ...entry.email,
+      similarity: entry.score,
+    })),
+  };
+}
+
+async function getSemanticStatus(userId, extras = {}) {
+  await ensureEmbeddingTable();
+
+  const [emailCount, embeddingRows, latestRows] = await Promise.all([
+    prisma.email.count({ where: { userId } }),
+    prisma.$queryRawUnsafe(
+      'SELECT COUNT(*)::int AS count FROM email_embeddings ee INNER JOIN emails e ON e.id = ee.email_id WHERE e.user_id = $1',
+      userId
+    ),
+    prisma.$queryRawUnsafe(
+      `
+        SELECT ee.created_at AS "createdAt"
+        FROM email_embeddings ee
+        INNER JOIN emails e ON e.id = ee.email_id
+        WHERE e.user_id = $1
+        ORDER BY ee.created_at DESC
+        LIMIT 1
+      `,
+      userId
+    ),
+  ]);
+
+  const indexedEmails = Number(embeddingRows?.[0]?.count || 0);
+  const coverage = emailCount ? Number(((indexedEmails / emailCount) * 100).toFixed(1)) : 0;
+
+  return {
+    totalEmails: emailCount,
+    indexedEmails,
+    pendingEmails: Math.max(emailCount - indexedEmails, 0),
+    coverage,
+    lastIndexedAt: latestRows?.[0]?.createdAt || null,
+    model: `mock-${VECTOR_LENGTH}`,
+    provider: 'mock-embedding',
+    indexedThisRun: extras.indexedThisRun || 0,
+  };
 }
 
 module.exports = {
   generateEmbedding,
   indexEmail,
-  searchSemantically
+  indexUserEmails,
+  semanticSearch,
+  searchEmails,
+  getSemanticStatus,
+  VECTOR_LENGTH,
 };

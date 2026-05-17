@@ -1,283 +1,217 @@
-import { useState, useEffect } from 'react';
-import axios from 'axios';
-import { Search, Sparkles, Database, Loader, ArrowRight, Mail } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import RecoverableErrorState from '../components/RecoverableErrorState';
+import { semanticAPI, stage3API } from '../services/api';
 
-const API_BASE = '/api/ai/semantic-search';
-
-export default function SemanticSearchPage() {
+const SemanticSearchPage = () => {
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [verification, setVerification] = useState(null);
+  const [summary, setSummary] = useState('Index your inbox first, then ask natural-language questions across your communication history.');
+  const [matches, setMatches] = useState([]);
+  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [indexing, setIndexing] = useState(false);
-  const [result, setResult] = useState(null);
-  const [indexMessage, setIndexMessage] = useState('');
-  const [token, setToken] = useState(localStorage.getItem('token') || '');
+  const [error, setError] = useState(null);
 
-  const suggestions = [
-    "show emails about Q3 hiring from last month",
-    "find invoices from Stripe or Amazon over $500",
-    "emails where client sounded unhappy or urgent",
-    "threads mentioning Kubernetes deployment issues",
-    "what are my critical deadlines next week?"
-  ];
+  const refreshStatus = async () => {
+    const [statusResponse, verifyResponse] = await Promise.all([
+      semanticAPI.status(),
+      stage3API.verify(),
+    ]);
 
-  const handleSearch = async (searchQuery) => {
-    const q = searchQuery || query;
-    if (!q.trim()) return;
-
-    setLoading(true);
-    setResult(null);
-    try {
-      const res = await axios.post(
-        API_BASE,
-        { query: q, limit: 5 },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setResult(res.data);
-    } catch (err) {
-      console.error(err);
-      setResult({
-        summary: '⚠️ Failed to connect to semantic search engine. Ensure your backend server is active and database is synchronized.',
-        matches: []
-      });
-    } finally {
-      setLoading(false);
-    }
+    setStatus(statusResponse.data);
+    setVerification(verifyResponse.data);
   };
 
-  const handleIndexWorkspace = async () => {
-    setIndexing(true);
-    setIndexMessage('Indexing inbox communications in the background. Embedding vectors are generating...');
+  useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      try {
+        setLoadingStatus(true);
+        await refreshStatus();
+      } catch (loadError) {
+        if (active) {
+          setError('Semantic search status is unavailable right now.');
+        }
+      } finally {
+        if (active) {
+          setLoadingStatus(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleIndex = async () => {
     try {
-      const res = await axios.post(
-        `${API_BASE}/index-all`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setIndexMessage(`✅ ${res.data.message}`);
-    } catch (err) {
-      setIndexMessage('⚠️ Indexing failed. Ensure API endpoints are mounted and database is accessible.');
+      setIndexing(true);
+      setError(null);
+      const response = await semanticAPI.index({ limit: 300 });
+      setStatus(response.data.status);
+      setSummary(`Indexed ${response.data.status.indexedThisRun} emails in this run. Current semantic coverage: ${response.data.status.coverage}%.`);
+      await refreshStatus();
+    } catch (indexError) {
+      setError(indexError.response?.data?.message || 'Indexing failed.');
     } finally {
       setIndexing(false);
-      setTimeout(() => setIndexMessage(''), 8000);
     }
   };
 
-  return (
-    <div className="analytics-container fade-in" style={{ padding: '1rem', color: 'var(--text)' }}>
-      {/* Indexer Banner */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '1rem 1.5rem',
-        borderRadius: '16px',
-        background: 'rgba(99, 102, 241, 0.08)',
-        border: '1px solid rgba(99, 102, 241, 0.2)',
-        marginBottom: '2rem'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <Database size={20} className="text-accent" style={{ color: 'var(--accent)' }} />
-          <div>
-            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>Semantic Index Workspace</h4>
-            <p style={{ margin: 0, fontSize: '0.8rem', opacity: 0.75 }}>Index your workspace emails to build search vector embeddings.</p>
-          </div>
+  const handleSearch = async (event) => {
+    event.preventDefault();
+    if (!query.trim()) {
+      return;
+    }
+
+    try {
+      setSearching(true);
+      setError(null);
+      const response = await semanticAPI.search(query, { limit: 10 });
+      setSummary(response.data.summary || 'Search completed.');
+      setMatches(response.data.matches || []);
+    } catch (searchError) {
+      setError(searchError.response?.data?.message || 'Semantic search failed.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  if (loadingStatus) {
+    return (
+      <div className="app-loading-shell">
+        <div className="app-loading-card">
+          <div className="app-loading-spinner"></div>
+          <p>Loading semantic intelligence...</p>
         </div>
-        <button
-          className="button button-ghost"
-          style={{ padding: '0.5rem 1rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          onClick={handleIndexWorkspace}
-          disabled={indexing}
-        >
-          {indexing ? <Loader size={14} className="animate-spin" /> : <Sparkles size={14} />}
-          {indexing ? 'Indexing...' : 'Index Workspace'}
-        </button>
+      </div>
+    );
+  }
+
+  if (!status) {
+    return (
+      <RecoverableErrorState
+        title="Semantic Search Unavailable"
+        message={error || 'The semantic search service is currently unavailable.'}
+        retryLabel="Retry"
+        onRetry={() => void refreshStatus()}
+      />
+    );
+  }
+
+  return (
+    <div className="dashboard-shell">
+      <div className="page-header" style={{ marginBottom: '1.5rem' }}>
+        <div>
+          <span className="eyebrow">Stage 3 / Semantic AI Search</span>
+          <h1 style={{ fontSize: '2.2rem' }}>Natural-Language Communication Recall</h1>
+          <p className="page-subtitle">Search your full inbox by intent, not keywords.</p>
+        </div>
       </div>
 
-      {indexMessage && (
-        <div className="pulse-card" style={{ padding: '1rem', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
-          {indexMessage}
+      <div className="bento-grid" style={{ marginBottom: '1.5rem' }}>
+        <div className="bento-col-4">
+          <div className="surface-card" style={{ padding: '1.4rem' }}>
+            <span className="eyebrow">Coverage</span>
+            <h2 style={{ margin: '0.4rem 0', fontSize: '1.9rem' }}>{status.coverage || 0}%</h2>
+            <p style={{ color: 'var(--text-dim)' }}>{status.indexedEmails || 0} / {status.totalEmails || 0} indexed</p>
+          </div>
         </div>
-      )}
+        <div className="bento-col-4">
+          <div className="surface-card" style={{ padding: '1.4rem' }}>
+            <span className="eyebrow">Embedding Layer</span>
+            <h2 style={{ margin: '0.4rem 0', fontSize: '1.2rem' }}>{status.model}</h2>
+            <p style={{ color: 'var(--text-dim)' }}>{status.provider}</p>
+          </div>
+        </div>
+        <div className="bento-col-4">
+          <div className="surface-card" style={{ padding: '1.4rem' }}>
+            <span className="eyebrow">Last Indexed</span>
+            <h2 style={{ margin: '0.4rem 0', fontSize: '1rem' }}>
+              {status.lastIndexedAt ? new Date(status.lastIndexedAt).toLocaleString() : 'Not indexed yet'}
+            </h2>
+            <p style={{ color: 'var(--text-dim)' }}>{status.pendingEmails || 0} pending</p>
+          </div>
+        </div>
+      </div>
 
-      {/* Main ChatGPT-style Search Area */}
-      <div style={{ textAlign: 'center', maxWidth: '800px', margin: '0 auto 3rem auto' }}>
-        <h2 style={{ fontSize: '2rem', fontWeight: 700, background: 'linear-gradient(135deg, var(--text), var(--accent))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '0.5rem' }}>
-          Natural-Language Recall
-        </h2>
-        <p style={{ opacity: 0.8, fontSize: '0.95rem', marginBottom: '2rem' }}>
-          Ask questions across your entire communications history. AI traverses vector layers to synthesize briefings instantly.
-        </p>
+      {verification?.systems ? (
+        <div className="surface-card" style={{ padding: '1.4rem', marginBottom: '1.5rem' }}>
+          <span className="eyebrow">Runtime Verification Layer</span>
+          <div style={{ marginTop: '0.8rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            <span className="mail-label">Embeddings: {verification.systems.embeddings.ready ? 'Ready' : 'Pending'}</span>
+            <span className="mail-label">Memory Graph: {verification.systems.memoryGraph.ready ? 'Ready' : 'Pending'}</span>
+            <span className="mail-label">Pending Workflows: {verification.systems.agentWorkflow.pendingApprovals}</span>
+            <span className="mail-label">Runtime: {verification.systems.runtime.degraded ? 'Degraded' : 'Healthy'}</span>
+          </div>
+        </div>
+      ) : null}
 
-        {/* Input Lockup */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          background: 'var(--panel-elevated)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-          borderRadius: '24px',
-          padding: '0.5rem 0.5rem 0.5rem 1.5rem',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
-          transition: 'border 0.3s ease',
-          marginBottom: '1.5rem'
-        }} className="search-input-container">
-          <Search size={20} style={{ opacity: 0.5, marginRight: '0.75rem' }} />
-          <input
-            type="text"
-            placeholder="e.g. Find invoices from Stripe or client agreements regarding Stage 3..."
+      <div className="surface-card" style={{ padding: '1.8rem', marginBottom: '1.5rem' }}>
+        <form onSubmit={handleSearch} style={{ display: 'grid', gap: '0.9rem' }}>
+          <textarea
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            onChange={(event) => setQuery(event.target.value)}
+            rows={3}
+            placeholder='Try: "find invoices from Amazon over $500"'
             style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
+              width: '100%',
+              borderRadius: '14px',
+              border: '1px solid var(--border)',
+              background: 'var(--panel-elevated)',
               color: 'var(--text)',
-              fontSize: '1rem',
-              padding: '0.5rem 0'
+              padding: '0.95rem',
             }}
           />
-          <button
-            className="button button-primary"
-            style={{
-              borderRadius: '16px',
-              padding: '0.6rem 1.2rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              background: 'linear-gradient(135deg, var(--highlight), var(--accent))'
-            }}
-            onClick={() => handleSearch()}
-            disabled={loading}
-          >
-            {loading ? <Loader className="animate-spin" size={16} /> : <ArrowRight size={16} />}
-            Ask AI
-          </button>
-        </div>
-
-        {/* Suggestions chips */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.5rem' }}>
-          {suggestions.map((s, idx) => (
-            <button
-              key={idx}
-              className="badge"
-              style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                color: 'var(--text)',
-                padding: '0.4rem 0.8rem',
-                borderRadius: '20px',
-                fontSize: '0.75rem',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onClick={() => {
-                setQuery(s);
-                handleSearch(s);
-              }}
-            >
-              {s}
+          <div className="button-row">
+            <button className="button button-secondary" type="button" onClick={() => void refreshStatus()}>
+              Refresh Status
             </button>
-          ))}
-        </div>
+            <button className="button button-primary" type="button" onClick={handleIndex} disabled={indexing}>
+              {indexing ? 'Indexing...' : 'Index Inbox'}
+            </button>
+            <button className="button button-primary" type="submit" disabled={searching || !query.trim()}>
+              {searching ? 'Searching...' : 'Run Semantic Search'}
+            </button>
+          </div>
+        </form>
+        {error ? <div className="status-pill status-warn" style={{ marginTop: '0.8rem' }}>{error}</div> : null}
       </div>
 
-      {/* Loading state */}
-      {loading && (
-        <div style={{ textAlign: 'center', margin: '4rem 0' }}>
-          <Loader size={40} className="animate-spin text-accent" style={{ color: 'var(--accent)', margin: '0 auto 1rem auto' }} />
-          <p style={{ opacity: 0.7, fontSize: '0.9rem' }}>Searching vector index & synthesizing executive briefing...</p>
-        </div>
-      )}
+      <div className="surface-card" style={{ padding: '1.8rem' }}>
+        <span className="eyebrow">AI Summary</span>
+        <p style={{ marginTop: '0.5rem', color: 'var(--text)' }}>{summary}</p>
 
-      {/* Results Panel */}
-      {result && (
-        <div style={{ maxWidth: '850px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          
-          {/* Executive Synthesis Card */}
-          <div style={{
-            background: 'rgba(255,255,255,0.02)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '24px',
-            padding: '2rem',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.15)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}>
-            {/* Glowing Accent */}
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '4px',
-              background: 'linear-gradient(90deg, var(--highlight), var(--accent))'
-            }}></div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              <Sparkles size={18} style={{ color: 'var(--accent)' }} />
-              <span className="eyebrow" style={{ letterSpacing: '2px', fontWeight: 600, color: 'var(--accent)' }}>AI SEARCH SUMMARY</span>
+        <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+          {matches.length === 0 ? (
+            <div className="empty-card">
+              <h3>No semantic matches yet</h3>
+              <p>Index your inbox and run a natural-language query to see ranked threads.</p>
             </div>
-
-            <div style={{
-              fontSize: '1.05rem',
-              lineHeight: 1.6,
-              opacity: 0.95,
-              whiteSpace: 'pre-line'
-            }} className="markdown-body">
-              {result.summary}
-            </div>
-          </div>
-
-          {/* Matched Emails List */}
-          <div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Mail size={18} />
-              Relevance Matches ({result.matches.length})
-            </h3>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {result.matches.map((email, idx) => (
-                <div
-                  key={email.id}
-                  style={{
-                    background: 'var(--panel-elevated)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    borderRadius: '16px',
-                    padding: '1.25rem',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.5rem',
-                    transition: 'all 0.2s hover'
-                  }}
-                  className="email-match-card"
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{email.senderName || email.sender}</span>
-                      <span className="badge badge-normal" style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '10px' }}>
-                        {email.category.toUpperCase()}
-                      </span>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>
-                      {new Date(email.receivedAt).toLocaleDateString()}
-                    </span>
-                  </div>
-
-                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--text)' }}>
-                    {email.subject}
-                  </h4>
-
-                  <p style={{ margin: 0, fontSize: '0.82rem', opacity: 0.75, lineHeight: 1.4 }}>
-                    {email.snippet}
-                  </p>
+          ) : (
+            matches.map((entry) => (
+              <article key={entry.id} className="surface-card" style={{ padding: '1rem', background: 'var(--panel-elevated)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem' }}>
+                  <strong>{entry.subject || 'No subject'}</strong>
+                  <span className="status-pill status-ok">Match {Math.round((entry.similarity || 0) * 100)}%</span>
                 </div>
-              ))}
-            </div>
-          </div>
-
+                <p style={{ marginTop: '0.4rem', color: 'var(--text-dim)' }}>{entry.summary || entry.snippet || 'No preview available.'}</p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                  <span className="mail-label">{entry.category || 'uncategorized'}</span>
+                  <span className="mail-label">{entry.priority || 'normal'}</span>
+                  <span className="mail-label">{new Date(entry.receivedAt).toLocaleString()}</span>
+                </div>
+              </article>
+            ))
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
-}
+};
+
+export default SemanticSearchPage;

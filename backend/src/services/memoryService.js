@@ -1,329 +1,203 @@
-/**
- * services/memoryService.js — Relationship Memory Graph
- * 
- * Production-grade Knowledge Graph abstraction inside PostgreSQL.
- * Uses Groq to extract entities and semantic relations from communications,
- * and executes query-focused graph traversal to synthesize business relationship summaries.
- */
-
+const crypto = require('crypto');
 const prisma = require('../config/database');
-const { requestGroq, extractJsonBlock } = require('../utils/xai');
 
-// ─── ENTITY EXTRACTION ENGINE ──────────────────────────────────────────────
+let memoryTablesReady = false;
 
-/**
- * Extracts entities and relationships from an email and indexes them into the graph.
- */
-async function extractAndIndexEmailEntities(email) {
-  try {
-    const textToAnalyze = `
-Subject: ${email.subject || ''}
-From: ${email.sender || ''}
-Date: ${email.receivedAt?.toISOString() || ''}
-Snippet: ${email.snippet || ''}
-Body: ${(email.body || '').slice(0, 1500)}
-`;
-
-    const prompt = `Analyze the following email content and extract important business intelligence entities and their relationships.
-We want to map these into a database Knowledge Graph.
-
-STRICT ENTITY TYPES:
-- "person": Any contact mentioned by name (e.g., "Sarah Connor", "John Doe").
-- "company": Organizations, clients, or vendors (e.g., "Microsoft", "Google", "Stripe").
-- "project": Named business initiatives, products, or campaigns (e.g., "Stage 3 Launch", "Website redesign").
-- "deadline": Dates when deliverables are expected.
-- "commitment": Specific promises, tasks, or action agreements made by the sender OR the recipient (e.g., "send draft review by Friday").
-
-STRICT RELATIONSHIP TYPES (Source ID -> Target ID):
-- "works_at": Links a person to their company.
-- "committed_to": Links a person or company to a commitment.
-- "belongs_to": Links a project to a company or a deadline to a project.
-- "mentions": Links the email subject/context to any of these entities.
-
-Return ONLY a valid JSON object matching this structure:
-{
-  "entities": [
-    { "name": "Exact capitalized name", "type": "person | company | project | deadline | commitment", "description": "Quick context of who they are or what the item represents" }
-  ],
-  "relationships": [
-    { "sourceName": "Sarah Connor", "sourceType": "person", "targetName": "Microsoft", "targetType": "company", "type": "works_at" },
-    { "sourceName": "Email Context", "sourceType": "project", "targetName": "send draft by Friday", "targetType": "commitment", "type": "committed_to" }
-  ]
-}
-
-Ensure:
-- Entity names are standardized (e.g. convert "Microsoft Corp" to "Microsoft").
-- If no entities/relationships are found, return empty lists.
-- Do NOT output any explanation text, ONLY the JSON block.
-
-Email Content:
-${textToAnalyze}
-`;
-
-    const response = await requestGroq([
-      { role: 'system', content: 'You are a graph database entity and relation extractor. Return clean, parsed structured JSON.' },
-      { role: 'user', content: prompt }
-    ], { temperature: 0.1, maxTokens: 1000 });
-
-    const jsonBlock = extractJsonBlock(response);
-    if (!jsonBlock) return;
-
-    const parsed = JSON.parse(jsonBlock);
-    const entities = parsed.entities || [];
-    const relationships = parsed.relationships || [];
-
-    if (!entities.length) return;
-
-    console.log(`🧠 [MemoryGraph] Extracted ${entities.length} entities and ${relationships.length} relationships for email: "${email.subject}"`);
-
-    // 1. Persist extracted nodes (entities)
-    const nodeMap = new Map(); // Maps standardized name+type key to Node record
-    
-    for (const ent of entities) {
-      const standardizedName = String(ent.name).trim().replace(/["']/g, '');
-      const type = String(ent.type).trim().toLowerCase();
-      if (!standardizedName || !type) continue;
-
-      const node = await prisma.memoryNode.upsert({
-        where: {
-          userId_name_type: {
-            userId: email.userId,
-            name: standardizedName,
-            type
-          }
-        },
-        update: {
-          metadata: {
-            description: ent.description || 'Synced contact node',
-            lastEmailId: email.id,
-            lastSubject: email.subject
-          }
-        },
-        create: {
-          userId: email.userId,
-          name: standardizedName,
-          type,
-          metadata: {
-            description: ent.description || 'Synced contact node',
-            originEmailId: email.id,
-            originSubject: email.subject
-          }
-        }
-      });
-
-      const key = `${standardizedName.toLowerCase()}:${type}`;
-      nodeMap.set(key, node);
-    }
-
-    // 2. Persist relationships
-    for (const rel of relationships) {
-      const sourceKey = `${String(rel.sourceName).trim().toLowerCase()}:${String(rel.sourceType).trim().toLowerCase()}`;
-      const targetKey = `${String(rel.targetName).trim().toLowerCase()}:${String(rel.targetType).trim().toLowerCase()}`;
-
-      const sourceNode = nodeMap.get(sourceKey);
-      const targetNode = nodeMap.get(targetKey);
-
-      if (!sourceNode || !targetNode) continue;
-
-      const relType = String(rel.type).trim().toLowerCase();
-
-      await prisma.memoryRelation.upsert({
-        where: {
-          userId_sourceId_targetId_type: {
-            userId: email.userId,
-            sourceId: sourceNode.id,
-            targetId: targetNode.id,
-            type: relType
-          }
-        },
-        update: {
-          metadata: {
-            lastSeenEmailId: email.id,
-            timestamp: new Date()
-          }
-        },
-        create: {
-          userId: email.userId,
-          sourceId: sourceNode.id,
-          targetId: targetNode.id,
-          type: relType,
-          metadata: {
-            associatedEmailId: email.id,
-            associatedSubject: email.subject,
-            timestamp: new Date()
-          }
-        }
-      });
-    }
-
-  } catch (error) {
-    console.error(`❌ [MemoryGraph] Extraction failed for email ${email.id}:`, error.message);
+async function ensureMemoryTables() {
+  if (memoryTablesReady) {
+    return;
   }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS memory_nodes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      type TEXT NOT NULL,
+      value TEXT NOT NULL,
+      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS memory_nodes_user_type_value_idx
+    ON memory_nodes(user_id, type, value);
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS memory_relations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      source_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL,
+      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS memory_relations_user_id_idx
+    ON memory_relations(user_id, relation_type, created_at DESC);
+  `);
+
+  memoryTablesReady = true;
 }
 
-// ─── MEMORY RELATION TIMELINE QUERY ENGINE ──────────────────────────────────
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
 
-/**
- * Traverses relationships around matching entities and compiles an intelligence briefing.
- */
-async function queryMemoryGraph(userId, queryText = '') {
-  if (!queryText.trim()) return { summary: 'Please ask a relationship or timeline question.', nodes: [], edges: [] };
+async function extractEntities(email) {
+  const body = String(email.body || email.snippet || '');
+  const subject = String(email.subject || '');
 
-  try {
-    console.log(`🕸️ [MemoryGraph] Querying relation net for user ${userId}: "${queryText}"`);
+  const people = unique((body.match(/\b[A-Z][a-z]{2,}\b/g) || []).slice(0, 40));
+  const projects = unique((subject.match(/\b[A-Z]{2,}[A-Za-z0-9_-]*\b/g) || []).slice(0, 20));
+  const organizations = unique((body.match(/\b[A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?\s(?:Inc|LLC|Ltd|Corp|Systems|Technologies)\b/g) || []).slice(0, 20));
+  const dates = unique((body.match(/\b(?:\d{1,2}\/\d{1,2}\/\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s\d{1,2})\b/gi) || []).slice(0, 20));
 
-    // 1. Identify relevant node targets from query utilizing Groq
-    const classificationPrompt = `Given the relationship graph query: "${queryText}"
-Identify which specific entities (names) or entity types are being asked about.
+  return {
+    people,
+    projects,
+    organizations,
+    dates,
+  };
+}
 
-Examples:
-- "What commitments did I make to Microsoft?" -> Name: "Microsoft", Type: "company"
-- "Timeline of projects with Sarah" -> Name: "Sarah", Type: "person"
+async function upsertMemoryNode(userId, type, value) {
+  await prisma.$executeRawUnsafe(
+    `
+      INSERT INTO memory_nodes (id, user_id, type, value, created_at)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+      ON CONFLICT (user_id, type, value) DO NOTHING
+    `,
+    crypto.randomUUID(),
+    userId,
+    type,
+    value
+  );
 
-Return ONLY a valid JSON array:
-[
-  { "name": "Name of entity", "type": "person | company | project | deadline | commitment | all" }
-]
-If none is matched, return an empty array. Do not write markdown or notes.
-`;
+  const rows = await prisma.$queryRawUnsafe(
+    'SELECT id, type, value FROM memory_nodes WHERE user_id = $1 AND type = $2 AND value = $3 LIMIT 1',
+    userId,
+    type,
+    value
+  );
 
-    const classificationRes = await requestGroq([
-      { role: 'system', content: 'You are an intelligent entity query translator. Extract entities in JSON format.' },
-      { role: 'user', content: classificationPrompt }
-    ], { temperature: 0.1, maxTokens: 200 });
+  return rows?.[0] || null;
+}
 
-    const entityArrayJson = extractJsonBlock(classificationRes, 'array');
-    const targetEntities = entityArrayJson ? JSON.parse(entityArrayJson) : [];
+async function createRelation(userId, sourceId, targetId, relationType) {
+  await prisma.$executeRawUnsafe(
+    `
+      INSERT INTO memory_relations (id, user_id, source_id, target_id, relation_type, created_at)
+      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+    `,
+    crypto.randomUUID(),
+    userId,
+    sourceId,
+    targetId,
+    relationType
+  );
+}
 
-    let coreNodeIds = [];
-    let queryConditions = [];
+async function buildMemoryGraph(email) {
+  await ensureMemoryTables();
 
-    if (targetEntities.length > 0) {
-      targetEntities.forEach(ent => {
-        const nameQuery = String(ent.name).trim();
-        if (nameQuery && nameQuery !== 'all') {
-          queryConditions.push({
-            name: { contains: nameQuery, mode: 'insensitive' }
-          });
-        }
-      });
-    }
+  const userId = email.userId;
+  const entities = await extractEntities(email);
 
-    // If nothing found from AI extraction, fall back to simple keyword matching on the query text
-    if (queryConditions.length === 0) {
-      const keywords = queryText.match(/\b[A-Z][a-z]+\b/g) || []; // CamelCase words
-      if (keywords.length > 0) {
-        keywords.forEach(kw => {
-          queryConditions.push({ name: { contains: kw, mode: 'insensitive' } });
-        });
-      } else {
-        // Ultimate fallback: scan everything for matching text
-        queryConditions.push({ name: { contains: queryText.slice(0, 10), mode: 'insensitive' } });
+  const emailNode = await upsertMemoryNode(userId, 'EMAIL', email.id);
+  if (!emailNode) {
+    return;
+  }
+
+  const linkedTypes = [
+    { key: 'people', type: 'PERSON', relationType: 'MENTIONED_IN' },
+    { key: 'projects', type: 'PROJECT', relationType: 'PROJECT_CONTEXT' },
+    { key: 'organizations', type: 'ORG', relationType: 'ORG_CONTEXT' },
+    { key: 'dates', type: 'DATE', relationType: 'TIMELINE_CONTEXT' },
+  ];
+
+  for (const config of linkedTypes) {
+    for (const value of entities[config.key] || []) {
+      // Keep sync stable even on noisy extraction.
+      // eslint-disable-next-line no-await-in-loop
+      const node = await upsertMemoryNode(userId, config.type, value);
+      if (node) {
+        // eslint-disable-next-line no-await-in-loop
+        await createRelation(userId, node.id, emailNode.id, config.relationType);
       }
     }
-
-    // 2. Fetch matched core nodes
-    const matchedNodes = await prisma.memoryNode.findMany({
-      where: {
-        userId,
-        OR: queryConditions
-      },
-      take: 12
-    });
-
-    coreNodeIds = matchedNodes.map(n => n.id);
-
-    if (coreNodeIds.length === 0) {
-      return {
-        summary: "I scanned your memory graph but could not locate specific entities matching your question. Try syncing more emails or searching for different contacts or companies.",
-        nodes: [],
-        edges: []
-      };
-    }
-
-    // 3. Graph Traversal: Fetch first-degree relations (edges where core nodes are either source or target)
-    const relations = await prisma.memoryRelation.findMany({
-      where: {
-        userId,
-        OR: [
-          { sourceId: { in: coreNodeIds } },
-          { targetId: { in: coreNodeIds } }
-        ]
-      },
-      include: {
-        source: true,
-        target: true
-      },
-      take: 30
-    });
-
-    // Extract all unique nodes involved in the network
-    const nodeMap = new Map();
-    matchedNodes.forEach(n => nodeMap.set(n.id, n));
-    
-    relations.forEach(rel => {
-      if (!nodeMap.has(rel.sourceId)) nodeMap.set(rel.sourceId, rel.source);
-      if (!nodeMap.has(rel.targetId)) nodeMap.set(rel.targetId, rel.target);
-    });
-
-    const networkNodes = Array.from(nodeMap.values());
-    const networkEdges = relations.map(r => ({
-      id: r.id,
-      sourceId: r.sourceId,
-      sourceName: r.source.name,
-      targetId: r.targetId,
-      targetName: r.target.name,
-      type: r.type,
-      metadata: r.metadata
-    }));
-
-    // 4. Graph prompt synthesis via Groq
-    const nodesString = networkNodes.map(n => `- [Node] ID: ${n.id}, Name: ${n.name}, Type: ${n.type}, Description: ${n.metadata?.description || ''}`).join('\n');
-    const edgesString = networkEdges.map(e => `- [Edge] "${e.sourceName}" (${e.type}) -> "${e.targetName}"`).join('\n');
-
-    const synthesisPrompt = `You are the ultimate Chief of Staff relationship memory engine. The user is asking about their business network relationships: "${queryText}"
-
-We traversed the PostgreSQL Knowledge Graph for user's indexed email history and returned the following graph entities (Nodes) and relationship connections (Edges):
-
-=== ACTIVE GRAPH NODE ENTITIES ===
-${nodesString}
-
-=== ACTIVE GRAPH RELATIONSHIP LINKS ===
-${edgesString}
-
-STRICT INSTRUCTIONS:
-- Review the graph connections to analyze the conversation history, deadlines, and promises.
-- Synthesize a comprehensive, executive relationship briefing answering: "${queryText}".
-- Use clean Markdown. Group answers under professional headers like:
-  - **🤝 Relationship Status** (Summarize connection depth with the person/company)
-  - **📌 Commitments & Promises** (List unresolved tasks or deliverables identified)
-  - **⏳ Active Deadlines & Milestones** (Mention calendar or date objectives)
-- Write in a natural, highly authoritative executive manner. Avoid saying "Based on the nodes provided".
-- Keep it highly actionable!
-`;
-
-    const summary = await requestGroq([
-      { role: 'system', content: 'You are an elite graph relationship summary engine. Deliver detailed timelines and risk audits based on node linkages.' },
-      { role: 'user', content: synthesisPrompt }
-    ], { temperature: 0.1, maxTokens: 800 });
-
-    return {
-      summary: summary || 'I calculated the relationship linkages but failed to compile the briefing summary.',
-      nodes: networkNodes.map(n => ({ id: n.id, name: n.name, type: n.type, description: n.metadata?.description })),
-      edges: networkEdges
-    };
-
-  } catch (error) {
-    console.error('❌ [MemoryGraph] Query process failed:', error.message);
-    return {
-      summary: 'An error occurred during knowledge graph traversal.',
-      nodes: [],
-      edges: []
-    };
   }
+
+  console.log('[MemoryGraph] Processed email');
+}
+
+async function queryMemory(question, userId) {
+  await ensureMemoryTables();
+
+  const keywords = unique(
+    String(question || '')
+      .toLowerCase()
+      .split(/\s+/)
+      .map((token) => token.replace(/[^a-z0-9]/g, ''))
+      .filter((token) => token.length > 2)
+  );
+
+  const baseRows = await prisma.$queryRawUnsafe(
+    `
+      SELECT id, type, value, created_at AS "createdAt"
+      FROM memory_nodes
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 300
+    `,
+    userId
+  );
+
+  if (!keywords.length) {
+    return baseRows;
+  }
+
+  return baseRows.filter((row) => {
+    const haystack = `${row.type} ${row.value}`.toLowerCase();
+    return keywords.some((keyword) => haystack.includes(keyword));
+  });
+}
+
+async function getMemoryGraphOverview(userId) {
+  await ensureMemoryTables();
+
+  const [counts, relations] = await Promise.all([
+    prisma.$queryRawUnsafe(
+      `
+        SELECT type, COUNT(*)::int AS count
+        FROM memory_nodes
+        WHERE user_id = $1
+        GROUP BY type
+      `,
+      userId
+    ),
+    prisma.$queryRawUnsafe(
+      `
+        SELECT relation_type AS "relationType", COUNT(*)::int AS count
+        FROM memory_relations
+        WHERE user_id = $1
+        GROUP BY relation_type
+      `,
+      userId
+    ),
+  ]);
+
+  return {
+    nodesByType: counts,
+    relationsByType: relations,
+  };
 }
 
 module.exports = {
-  extractAndIndexEmailEntities,
-  queryMemoryGraph
+  buildMemoryGraph,
+  extractEntities,
+  getMemoryGraphOverview,
+  queryMemory,
 };

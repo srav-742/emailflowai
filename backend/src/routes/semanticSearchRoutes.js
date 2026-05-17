@@ -1,58 +1,50 @@
-/**
- * routes/semanticSearchRoutes.js — Semantic AI Search endpoints
- */
-
 const express = require('express');
-const { searchSemantically, indexEmail } = require('../services/semanticSearchService');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../utils/asyncHandler');
-const prisma = require('../config/database');
+const { semanticSearch, searchEmails, indexUserEmails, getSemanticStatus } = require('../services/semanticSearchService');
+const { queryMemory, getMemoryGraphOverview } = require('../services/memoryService');
+const { getStage3Verification } = require('../services/stage3VerificationService');
 
 const router = express.Router();
 
-// ─── SEMANTIC CONTEXT QUERY ───────────────────────────────────────────────
-router.post('/', authenticate, asyncHandler(async (req, res) => {
-  const { query, limit } = req.body;
-  if (!query) {
-    return res.status(400).json({ error: 'Query parameter "query" is required.' });
-  }
+router.use(authenticate);
 
-  const result = await searchSemantically(req.user.id, query, limit || 6);
+router.post('/semantic-search', asyncHandler(async (req, res) => {
+  const { query = '', limit = 10 } = req.body || {};
+  const scored = await semanticSearch(query, req.user.id, { limit });
+  res.json(scored);
+}));
+
+router.get('/semantic/status', asyncHandler(async (req, res) => {
+  const status = await getSemanticStatus(req.user.id);
+  res.json(status);
+}));
+
+router.post('/semantic/index', asyncHandler(async (req, res) => {
+  const status = await indexUserEmails(req.user.id, req.body || {});
+  res.json({ success: true, status });
+}));
+
+router.post('/semantic/query', asyncHandler(async (req, res) => {
+  const { query = '', limit = 10, category } = req.body || {};
+  const result = await searchEmails(req.user.id, query, { limit, category });
   res.json(result);
 }));
 
-// ─── INDEX ENTIRE WORKSPACE (ON-DEMAND) ────────────────────────────────────
-router.post('/index-all', authenticate, asyncHandler(async (req, res) => {
-  console.log(`⚡ [SemanticSearch] Starting full inbox indexing for user ${req.user.id}`);
-  
-  // Find emails that do not have a SemanticEmailIndex yet
-  const emailsToIndex = await prisma.email.findMany({
-    where: {
-      userId: req.user.id,
-      semanticIndex: null
-    },
-    take: 40 // Limit batch size for safety & rate limits
-  });
+router.post('/memory/query', asyncHandler(async (req, res) => {
+  const { question = '' } = req.body || {};
+  const nodes = await queryMemory(question, req.user.id);
+  res.json({ nodes });
+}));
 
-  if (emailsToIndex.length === 0) {
-    return res.json({ message: 'All email communications are already indexed and search-ready!', indexedCount: 0 });
-  }
+router.get('/memory/overview', asyncHandler(async (req, res) => {
+  const overview = await getMemoryGraphOverview(req.user.id);
+  res.json(overview);
+}));
 
-  // Run embedding indexing in background to avoid blocking response
-  let indexCount = 0;
-  for (const email of emailsToIndex) {
-    try {
-      await indexEmail(email);
-      indexCount++;
-    } catch (err) {
-      console.error(`⚠️ Failed to index email ${email.id}:`, err.message);
-    }
-  }
-
-  res.json({
-    message: `Successfully indexed ${indexCount} emails semantically!`,
-    indexedCount: indexCount
-  });
+router.get('/stage3/verify', asyncHandler(async (req, res) => {
+  const report = await getStage3Verification(req.user.id);
+  res.json(report);
 }));
 
 module.exports = router;

@@ -119,9 +119,25 @@ export const accountAPI = {
 };
 
 export const semanticAPI = {
-  status: () => api.get('/semantic/status'),
-  index: (data = {}) => api.post('/semantic/index', data),
-  search: (params = {}) => api.get('/semantic/search', { params }),
+  status: () => api.get('/ai/semantic/status'),
+  index: (data = {}) => api.post('/ai/semantic/index', data),
+  search: (query, options = {}) => api.post('/ai/semantic/query', { query, ...options }),
+  searchLegacy: (params = {}) => api.get('/semantic/search', { params }),
+};
+
+export const memoryAPI = {
+  query: (question) => api.post('/ai/memory/query', { question }),
+  overview: () => api.get('/ai/memory/overview'),
+};
+
+export const agentAPI = {
+  list: (status = null) => api.get('/agent/workflows', { params: status ? { status } : {} }),
+  approve: (id) => api.post(`/agent/workflows/${id}/approve`),
+  reject: (id) => api.post(`/agent/workflows/${id}/reject`),
+};
+
+export const stage3API = {
+  verify: () => api.get('/ai/stage3/verify'),
 };
 
 export default api;

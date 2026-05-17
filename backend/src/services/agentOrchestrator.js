@@ -1,213 +1,182 @@
-/**
- * services/agentOrchestrator.js — Proactive Autonomous Agent Orchestrator
- * 
- * Production-grade multi-agent tool scheduler.
- * Scans communications for specific intent triggers, compiles multi-step proposed workflows,
- * registers them in the database, and executes complex tasks (calendar bookings, draft compositions)
- * strictly upon manual dashboard approval.
- */
-
+const crypto = require('crypto');
 const prisma = require('../config/database');
-const { requestGroq, extractJsonBlock } = require('../utils/xai');
 
-// ─── AGENT SCANNER & TRIGGER ENGINE ────────────────────────────────────────
+let workflowTableReady = false;
 
-/**
- * Scans an email for autonomous triggers and inserts workflow proposals into the queue.
- */
-async function scanEmailForAgentActions(email) {
-  try {
-    const textToScan = `
-Subject: ${email.subject || ''}
-From: ${email.sender || ''}
-Snippet: ${email.snippet || ''}
-Body: ${(email.body || '').slice(0, 1500)}
-`;
-
-    const prompt = `You are a proactive Executive AI Agent. Analyze this incoming email to determine if it matches any critical autonomous workflow triggers.
-
-CRITICAL WORKFLOW TRIGGERS:
-1. "meeting_request": The sender is requesting to book a meeting, hop on a call, schedule a demo, or set up an interview.
-2. "invoice_overdue": Mention of an unpaid bill, overdue payment request, pending subscription invoice, or money settlement request.
-3. "system_incident": Alerts of server outages, broken APIs, failed CI/CD deployments, build crashes, or critical customer bugs.
-
-If it matches any of these triggers, construct a comprehensive, multi-step action plan to handle it.
-Otherwise, return null.
-
-Return ONLY a valid JSON object matching this structure:
-{
-  "triggerType": "meeting_request | invoice_overdue | system_incident",
-  "title": "Clear action title (e.g. Schedule meeting with John / Process Stripe Invoice)",
-  "description": "AI-generated explanation of why this workflow was created and what tools we will execute.",
-  "actionData": {
-    "proposedDraftReply": "A complete, polite email draft reply resolving this trigger (e.g. providing calendar availability or requesting bank details). Keep it style-aware, professional, and under 8 lines.",
-    "createCalendarEvent": {
-      "title": "Proposed Event Title",
-      "durationMinutes": 30,
-      "description": "Proposed event details"
-    },
-    "createTask": {
-      "title": "Action Checklist Task Title",
-      "dueDateOffsetDays": 2,
-      "priority": "high | medium | low"
-    }
+async function ensureWorkflowTable() {
+  if (workflowTableReady) {
+    return;
   }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS agent_workflow_approvals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      explanation TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS agent_workflow_approvals_user_status_idx
+    ON agent_workflow_approvals(user_id, status, created_at DESC);
+  `);
+
+  workflowTableReady = true;
 }
 
-Do NOT write markdown notes or explanation text. Return ONLY the JSON object.
+function buildWorkflowCandidates(email) {
+  const subject = String(email.subject || '').toLowerCase();
+  const body = String(email.body || email.snippet || '').toLowerCase();
+  const text = `${subject} ${body}`;
+  const workflows = [];
 
-Email Content:
-${textToScan}
-`;
+  if (text.includes('meeting') || text.includes('schedule') || text.includes('availability')) {
+    workflows.push({
+      type: 'MEETING_REPLY',
+      explanation: 'Meeting request detected',
+    });
+  }
 
-    const response = await requestGroq([
-      { role: 'system', content: 'You are an autonomous executive workflow planner. Return clean, parsed structured JSON.' },
-      { role: 'user', content: prompt }
-    ], { temperature: 0.1, maxTokens: 800 });
+  if (text.includes('invoice') || text.includes('payment') || text.includes('overdue')) {
+    workflows.push({
+      type: 'PAYMENT_FOLLOWUP',
+      explanation: 'Invoice or payment follow-up detected',
+    });
+  }
 
-    const jsonBlock = extractJsonBlock(response);
-    if (!jsonBlock) return;
+  if (text.includes('deploy failed') || text.includes('incident') || text.includes('outage')) {
+    workflows.push({
+      type: 'INCIDENT_ESCALATION',
+      explanation: 'Operational risk trigger detected',
+    });
+  }
 
-    const parsed = JSON.parse(jsonBlock);
-    if (!parsed || !parsed.triggerType) return;
+  return workflows;
+}
 
-    console.log(`🤖 [AgentAgent] Trigger matches "${parsed.triggerType}" for email: "${email.subject}"`);
+async function detectWorkflow(email) {
+  await ensureWorkflowTable();
 
-    // Insert pending proposed workflow into Database queue
-    await prisma.agentWorkflowApproval.create({
-      data: {
-        userId: email.userId,
+  const workflows = buildWorkflowCandidates(email);
+  if (!workflows.length) {
+    return [];
+  }
+
+  const created = [];
+  for (const workflow of workflows) {
+    const duplicateRows = await prisma.$queryRawUnsafe(
+      `
+        SELECT id
+        FROM agent_workflow_approvals
+        WHERE user_id = $1
+          AND type = $2
+          AND status = 'PENDING'
+          AND payload->>'emailId' = $3
+        LIMIT 1
+      `,
+      email.userId,
+      workflow.type,
+      email.id
+    );
+
+    if (duplicateRows.length) {
+      continue;
+    }
+
+    // Keep default behavior approval-first and fully auditable.
+    const workflowId = crypto.randomUUID();
+    await prisma.$executeRawUnsafe(
+      `
+        INSERT INTO agent_workflow_approvals (
+          id, user_id, type, status, explanation, payload, created_at
+        ) VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, CURRENT_TIMESTAMP)
+      `,
+      workflowId,
+      email.userId,
+      workflow.type,
+      workflow.explanation,
+      JSON.stringify({
         emailId: email.id,
-        triggerType: parsed.triggerType,
-        title: parsed.title || 'Proposed Autonomous Task',
-        description: parsed.description || 'Workflow designed by Chief of Staff AI.',
-        status: 'pending',
-        actionData: parsed.actionData || {}
-      }
-    });
+        subject: email.subject || null,
+        sender: email.sender || null,
+      })
+    );
 
-  } catch (error) {
-    console.error(`❌ [AgentOrchestrator] Trigger scan error for email ${email.id}:`, error.message);
+    created.push({
+      id: workflowId,
+      type: workflow.type,
+      status: 'PENDING',
+      explanation: workflow.explanation,
+      payload: {
+        emailId: email.id,
+      },
+    });
   }
+
+  if (created.length) {
+    console.log('[Agent] Workflow created');
+  }
+
+  return created;
 }
 
-// ─── WORKFLOW EXECUTION TOOL ENGINE ────────────────────────────────────────
+async function listWorkflows(userId, status = null) {
+  await ensureWorkflowTable();
 
-/**
- * Executes the tools defined in the approved workflow.
- */
-async function executeApprovedWorkflow(workflowId) {
-  try {
-    const workflow = await prisma.agentWorkflowApproval.findUnique({
-      where: { id: workflowId },
-      include: { email: true }
-    });
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT id, type, status, explanation, payload, created_at AS "createdAt"
+      FROM agent_workflow_approvals
+      WHERE user_id = $1
+        AND ($2::text IS NULL OR status = $2::text)
+      ORDER BY created_at DESC
+      LIMIT 150
+    `,
+    userId,
+    status || null
+  );
 
-    if (!workflow || workflow.status !== 'pending') {
-      throw new Error('Workflow not found or already processed.');
-    }
+  return rows.map((row) => ({
+    ...row,
+    payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload,
+  }));
+}
 
-    console.log(`🚀 [AgentOrchestrator] Executing approved workflow: "${workflow.title}"`);
-    const actionData = workflow.actionData;
+async function updateWorkflowStatus(userId, workflowId, status) {
+  await ensureWorkflowTable();
 
-    // 1. Tool A: Create Calendar Placeholder
-    if (actionData.createCalendarEvent) {
-      const calData = actionData.createCalendarEvent;
-      const startTime = new Date();
-      startTime.setDate(startTime.getDate() + 2); // Schedule 2 days from now by default
-      startTime.setHours(10, 0, 0, 0); // 10:00 AM
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      UPDATE agent_workflow_approvals
+      SET status = $1
+      WHERE id = $2
+        AND user_id = $3
+      RETURNING id, type, status, explanation, payload, created_at AS "createdAt"
+    `,
+    status,
+    workflowId,
+    userId
+  );
 
-      const endTime = new Date(startTime.getTime() + calData.durationMinutes * 60 * 1000);
-
-      await prisma.calendarEvent.create({
-        data: {
-          userId: workflow.userId,
-          googleEventId: `workflow-cal-${workflow.id}-${Date.now()}`,
-          calendarId: 'primary',
-          title: calData.title || 'Calendar Placeholder',
-          description: calData.description || 'Created autonomously by EmailFlow Agent',
-          startTime,
-          endTime,
-          meetingLink: 'https://meet.google.com/mock-link-ef',
-          linkedEmailId: workflow.emailId
-        }
-      });
-      console.log('✅ [AgentTool] Created calendar placeholder event.');
-    }
-
-    // 2. Tool B: Create Action Checklist Task
-    if (actionData.createTask) {
-      const taskData = actionData.createTask;
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + (taskData.dueDateOffsetDays || 2));
-
-      await prisma.actionItem.create({
-        data: {
-          userId: workflow.userId,
-          emailId: workflow.emailId,
-          title: taskData.title || 'Action Required',
-          description: `Extracted via Autonomous workflow: ${workflow.title}`,
-          assignee: 'Self',
-          dueDate,
-          priority: (taskData.priority || 'medium').toUpperCase(),
-          status: 'PENDING'
-        }
-      });
-      console.log('✅ [AgentTool] Appended action item to task checklist.');
-    }
-
-    // 3. Tool C: Draft Email Composer (Simulate sending or queueing draft reply)
-    if (actionData.proposedDraftReply && workflow.emailId) {
-      // Elevate email's priority status
-      await prisma.email.update({
-        where: { id: workflow.emailId },
-        data: {
-          isEditedReply: true,
-          priority: 'high',
-          priorityScore: 0.95,
-          priorityReason: `[Agent Active Approval] Draft reply queued automatically: "${workflow.title}"`
-        }
-      });
-      console.log('✅ [AgentTool] Prepared email draft response and elevated inbox thread priority.');
-    }
-
-    // Update workflow status to executed
-    await prisma.agentWorkflowApproval.update({
-      where: { id: workflowId },
-      data: { status: 'executed' }
-    });
-
-    return { success: true, message: `Successfully executed autonomous workflow "${workflow.title}".` };
-
-  } catch (error) {
-    console.error(`❌ [AgentOrchestrator] Execution failed for workflow ${workflowId}:`, error.message);
+  const row = rows?.[0] || null;
+  if (!row) {
+    const error = new Error('Workflow not found');
+    error.statusCode = 404;
     throw error;
   }
-}
 
-/**
- * Rejects and cancels a proposed workflow.
- */
-async function rejectWorkflow(workflowId) {
-  const workflow = await prisma.agentWorkflowApproval.findUnique({
-    where: { id: workflowId }
-  });
-
-  if (!workflow || workflow.status !== 'pending') {
-    throw new Error('Workflow not found or already processed.');
-  }
-
-  await prisma.agentWorkflowApproval.update({
-    where: { id: workflowId },
-    data: { status: 'rejected' }
-  });
-
-  console.log(`❌ [AgentOrchestrator] Workflow proposal rejected: "${workflow.title}"`);
-  return { success: true, message: 'Workflow proposal successfully rejected and removed from queue.' };
+  return {
+    ...row,
+    payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload,
+  };
 }
 
 module.exports = {
-  scanEmailForAgentActions,
-  executeApprovedWorkflow,
-  rejectWorkflow
+  detectWorkflow,
+  listWorkflows,
+  updateWorkflowStatus,
 };

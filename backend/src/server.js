@@ -31,6 +31,8 @@ const errorRoutes = require('./routes/errorRoutes');
 const { router: sseRouter } = require('./routes/sse');
 const pushRoutes = require('./routes/pushRoutes');
 const semanticRoutes = require('./routes/semanticRoutes');
+const semanticSearchRoutes = require('./routes/semanticSearchRoutes');
+const agentRoutes = require('./routes/agentRoutes');
 const digestService = require('./services/digestService');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
@@ -237,6 +239,7 @@ app.use('/api/auth', authRoutes);
 app.use('/auth', authRoutes);
 app.use('/api/emails', emailRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/ai', semanticSearchRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/action-items', actionItemRoutes);
 app.use('/api/follow-ups', followUpRoutes);
@@ -252,6 +255,7 @@ app.use('/api/ai/semantic-search', require('./routes/semanticSearchRoutes'));
 app.use('/api/ai/memory', require('./routes/memoryRoutes'));
 app.use('/api/agent', require('./routes/agentRoutes'));
 app.use('/api/semantic', semanticRoutes);
+app.use('/api/agent', agentRoutes);
 app.use('/api', require('./routes/test.route'));
 
 // Transitioned: Analytics and Digest scheduling moved to BullMQ Scheduler in initRepeatableJobs.js

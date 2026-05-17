@@ -473,42 +473,6 @@ model EmailEmbedding {
 model MemoryNode {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
-  type      String
-  value     String
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@index([userId, type])
-  @@map("memory_nodes")
-}
-
-model MemoryRelation {
-  id           String   @id @default(uuid())
-  userId       String   @map("user_id")
-  sourceId     String   @map("source_id")
-  targetId     String   @map("target_id")
-  relationType String   @map("relation_type")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  @@index([userId, relationType])
-  @@map("memory_relations")
-}
-
-model AgentWorkflowApproval {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
-  type        String
-  status      String
-  explanation String
-  payload     Json
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  @@index([userId, status])
-  @@map("agent_workflow_approvals")
-}
-
-model MemoryNode {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
   name      String   // Entity name (e.g. "Sarah", "Microsoft", "Q3 Hiring")
   type      String   // Entity type (e.g. "person", "company", "project", "deadline", "commitment")
   metadata  Json?    // Extracted detail (e.g. email reference, description, role)

@@ -621,18 +621,101 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
   }
 }
 
-function syncInbox(userId, maxResults = 35, options = {}) {
-  if (activeSyncs.has(userId)) {
-    return activeSyncs.get(userId);
+/**
+ * Syncs ALL connected Google accounts for a user and merges the results.
+ * Falls back to legacy single-account sync if no EmailAccount rows exist.
+ */
+async function syncAllAccountsInternal(userId, maxResults = 35, options = {}) {
+  const { returnMeta = false } = options;
+
+  const accounts = await prisma.emailAccount.findMany({
+    where: {
+      userId,
+      provider: 'google',
+      syncEnabled: true,
+      OR: [
+        { accessToken: { not: null } },
+        { refreshToken: { not: null } },
+      ],
+    },
+    select: { id: true, email: true },
+  });
+
+  // No explicit accounts → fall back to legacy single-account sync
+  if (accounts.length === 0) {
+    return syncInboxInternal(userId, maxResults, options);
   }
 
-  const syncPromise = syncInboxInternal(userId, maxResults, options).finally(() => {
-    if (activeSyncs.get(userId) === syncPromise) {
-      activeSyncs.delete(userId);
+  // Single account → sync it directly (avoids unnecessary aggregation)
+  if (accounts.length === 1) {
+    return syncInboxInternal(userId, maxResults, { ...options, accountId: accounts[0].id });
+  }
+
+  // Multiple accounts → sync each and merge
+  const allEmails = [];
+  const allNewEmails = [];
+  const warnings = [];
+  let anyDegraded = false;
+
+  for (const account of accounts) {
+    try {
+      const result = await syncInboxInternal(userId, maxResults, {
+        ...options,
+        returnMeta: true,
+        accountId: account.id,
+      });
+
+      allEmails.push(...(result.emails || []));
+      allNewEmails.push(...(result.newEmails || []));
+      if (result.degraded) anyDegraded = true;
+      if (result.warning) warnings.push(result.warning);
+    } catch (error) {
+      console.error(`[Sync] Failed to sync account ${account.email} (${account.id}):`, error.message);
+      warnings.push(`Failed to sync ${account.email}: ${error.message}`);
+    }
+  }
+
+  // Deduplicate by email ID and sort newest-first
+  const emailMap = new Map();
+  allEmails.forEach((e) => emailMap.set(e.id, e));
+  const deduped = sortEmailsByNewest(Array.from(emailMap.values()));
+
+  const newEmailMap = new Map();
+  allNewEmails.forEach((e) => newEmailMap.set(e.id, e));
+  const dedupedNew = sortEmailsByNewest(Array.from(newEmailMap.values()));
+
+  const result = {
+    emails: deduped,
+    newEmails: dedupedNew,
+    degraded: anyDegraded,
+    warning: warnings.length > 0 ? warnings.join(' | ') : null,
+  };
+
+  return returnMeta ? result : result.emails;
+}
+
+function syncInbox(userId, maxResults = 35, options = {}) {
+  const { accountId = null } = options;
+
+  // Use a cache key that includes accountId so per-account syncs don't collide
+  const cacheKey = accountId ? `${userId}:${accountId}` : userId;
+
+  if (activeSyncs.has(cacheKey)) {
+    return activeSyncs.get(cacheKey);
+  }
+
+  // Route: specific account → single sync, no account → all-accounts sync
+  const syncFn = accountId
+    ? syncInboxInternal(userId, maxResults, options)
+    : syncAllAccountsInternal(userId, maxResults, options);
+
+  const syncPromise = syncFn.finally(() => {
+    if (activeSyncs.get(cacheKey) === syncPromise) {
+      activeSyncs.delete(cacheKey);
     }
   });
 
-  activeSyncs.set(userId, syncPromise);
+  activeSyncs.set(cacheKey, syncPromise);
   return syncPromise;
 }
 

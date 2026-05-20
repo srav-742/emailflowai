@@ -148,7 +148,7 @@ async function persistGmailTokens(userId, tokens) {
   });
 
   // 2. Create or update the EmailAccount record
-  await prisma.emailAccount.upsert({
+  const emailAccount = await prisma.emailAccount.upsert({
     where: {
       provider_email: {
         provider: 'google',
@@ -205,6 +205,19 @@ async function persistGmailTokens(userId, tokens) {
       ].join(' '),
     },
   });
+
+  // 4. Trigger immediate background sync for the newly connected account
+  try {
+    const { gmailQueue } = require('../queues/gmail.queue');
+    await gmailQueue.add('sync-inbox', {
+      type: 'sync-inbox',
+      userId,
+      accountId: emailAccount.id,
+    });
+    console.log(`[Auth] Queued immediate sync for ${accountEmail} (account: ${emailAccount.id})`);
+  } catch (queueError) {
+    console.error('[Auth] Failed to queue initial sync:', queueError.message);
+  }
 
   return updatedUser;
 }

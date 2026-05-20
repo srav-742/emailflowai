@@ -197,6 +197,16 @@ const Dashboard = () => {
     return () => window.clearInterval(interval);
   }, [refreshWorkspace]);
 
+  // Auto-trigger sync when Gmail is connected but inbox is still empty (first connection)
+  const hasAutoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (user?.hasGmailAccess && !loading && emails.length === 0 && !syncing && !hasAutoSyncedRef.current) {
+      hasAutoSyncedRef.current = true;
+      console.log('[Dashboard] Auto-triggering initial sync after Gmail connection...');
+      handleSyncEmails();
+    }
+  }, [user?.hasGmailAccess, loading, emails.length, syncing]);
+
   useEffect(() => {
     if (!user?.id || !user?.hasGmailAccess) return undefined;
 

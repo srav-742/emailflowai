@@ -203,7 +203,7 @@ app.use(cors({
 
 // Security headers — use unsafe-none for COOP to allow Google OAuth popup communication
 app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });

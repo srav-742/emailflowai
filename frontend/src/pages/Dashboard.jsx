@@ -239,7 +239,7 @@ const Dashboard = () => {
   const handleSyncEmails = async (e) => {
     try {
       setSyncing(true);
-      await emailAPI.syncEmails();
+      await emailAPI.syncEmails(selectedAccountId);
       await refreshWorkspace();
       setNotice({ tone: 'ok', text: 'Inbox synced successfully.' });
       if (e?.target) {

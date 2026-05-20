@@ -23,33 +23,93 @@ const gmailWorker = new Worker(
       switch (type) {
         case 'sync-inbox': {
           console.log(`[Gmail Worker] Syncing inbox for user: ${userId}, account: ${accountId || 'primary'}`);
-          // Placeholder: Call your existing syncInbox here
-          // const { syncInbox } = require('../services/inboxSyncService');
-          // const result = await syncInbox(userId, 25, { returnMeta: true, accountId });
-          return { success: true, type: 'sync-inbox', userId };
+          const { syncInbox } = require('../services/inboxSyncService');
+          const result = await syncInbox(userId, 25, { returnMeta: true, accountId });
+          return { 
+            success: true, 
+            type: 'sync-inbox', 
+            userId, 
+            accountId,
+            emailsCount: result.emails?.length || 0,
+            newEmailsCount: result.newEmails?.length || 0
+          };
         }
 
         case 'refresh-token': {
-          console.log(`[Gmail Worker] Refreshing token for user: ${userId}`);
-          // Placeholder: Call your existing tokenService here
-          // const { getValidAccessToken } = require('../services/tokenService');
-          // await getValidAccessToken(userId, accountId);
-          return { success: true, type: 'refresh-token', userId };
+          console.log(`[Gmail Worker] Refreshing token for user: ${userId}, account: ${accountId || 'primary'}`);
+          const { getValidAccessToken } = require('../services/tokenService');
+          const token = await getValidAccessToken(userId, accountId);
+          return { success: true, type: 'refresh-token', userId, hasToken: !!token };
         }
 
         case 'sync-calendar': {
           console.log(`[Gmail Worker] Syncing calendar for user: ${userId}`);
-          // Placeholder: Call your existing calendarService here
-          // const { syncCalendar } = require('../services/calendarService');
-          // await syncCalendar(userId);
+          const { syncCalendar } = require('../services/calendarService');
+          await syncCalendar(userId);
           return { success: true, type: 'sync-calendar', userId };
         }
 
         case 'periodic-sync': {
-          console.log(`[Gmail Worker] Running periodic sync`);
-          // This is the scheduled recurring job
-          // Placeholder: Trigger full inbox poll
-          return { success: true, type: 'periodic-sync' };
+          console.log(`[Gmail Worker] Running periodic sync to queue accounts...`);
+          const { gmailQueue } = require('../queues/gmail.queue');
+          
+          const users = await prisma.user.findMany({
+            where: {
+              OR: [
+                { accessToken: { not: null } },
+                { refreshToken: { not: null } },
+                {
+                  emailAccounts: {
+                    some: {
+                      provider: 'google',
+                      syncEnabled: true,
+                      OR: [
+                        { accessToken: { not: null } },
+                        { refreshToken: { not: null } },
+                      ],
+                    },
+                  },
+                },
+                {
+                  oauthTokens: {
+                    some: {},
+                  },
+                },
+              ],
+            },
+            select: { id: true, email: true, accessToken: true, refreshToken: true }
+          });
+
+          let jobsQueued = 0;
+          for (const user of users) {
+            const accounts = await prisma.emailAccount.findMany({
+              where: {
+                userId: user.id,
+                provider: 'google',
+                syncEnabled: true,
+              },
+              select: { id: true, email: true }
+            });
+
+            if (accounts.length > 0) {
+              for (const account of accounts) {
+                await gmailQueue.add('sync-inbox', {
+                  type: 'sync-inbox',
+                  userId: user.id,
+                  accountId: account.id,
+                });
+                jobsQueued++;
+              }
+            } else if (user.accessToken || user.refreshToken) {
+              await gmailQueue.add('sync-inbox', {
+                type: 'sync-inbox',
+                userId: user.id,
+                accountId: null,
+              });
+              jobsQueued++;
+            }
+          }
+          return { success: true, type: 'periodic-sync', usersCount: users.length, jobsQueued };
         }
 
         default: {
@@ -64,10 +124,20 @@ const gmailWorker = new Worker(
       if (error.message?.includes('invalid_grant') || error.message?.includes('refresh_token')) {
         console.warn(`⚠️ [Gmail Worker] OAuth Revoked for User: ${userId}. Marking for reconnect.`);
         try {
-          await prisma.emailAccount.updateMany({
-            where: { userId, provider: 'gmail' },
-            data: { requiresReconnect: true },
-          });
+          if (accountId) {
+            await prisma.emailAccount.update({
+              where: { id: accountId },
+              data: { requiresReconnect: true },
+            });
+          } else {
+            await prisma.emailAccount.updateMany({
+              where: {
+                userId,
+                provider: { in: ['gmail', 'google'] },
+              },
+              data: { requiresReconnect: true },
+            });
+          }
         } catch (dbErr) {
           console.error(`❌ [Gmail Worker] Failed to update reconnect status:`, dbErr.message);
         }

@@ -51,7 +51,7 @@ export const authAPI = {
 // Email APIs
 export const emailAPI = {
   fetchEmails: () => api.get('/emails/fetch'),
-  syncEmails: () => api.get('/emails/sync'),
+  syncEmails: (accountId) => api.get('/emails/sync', { params: accountId ? { accountId } : {} }),
   getEmails: (params = {}) => api.get('/emails', { params }),
   getThreads: (params = {}) => api.get('/emails/threads', { params }),
   searchEmails: (params = {}) => api.get('/emails/search', { params }),

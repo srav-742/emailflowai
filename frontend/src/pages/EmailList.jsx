@@ -105,7 +105,7 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
   const handleSync = async () => {
     try {
       setLoading(true);
-      const response = await emailAPI.syncEmails();
+      const response = await emailAPI.syncEmails(selectedAccountId);
       setSyncMessage(response.data.warning || response.data.message || 'Inbox synced successfully.');
       
       // Update button feedback

@@ -24,8 +24,8 @@ const Login = () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await loginWithGoogle();
-      navigate(result?.user?.hasGmailAccess ? '/dashboard' : '/auth/gmail-connect');
+      await loginWithGoogle();
+      navigate('/dashboard');
     } catch (err) {
       console.error('Google login error:', err);
       setError(err.message || 'Failed to sign in with Google. Please try again.');

@@ -4,41 +4,6 @@ const prisma = require('../config/database');
 let memoryTablesReady = false;
 
 async function ensureMemoryTables() {
-  if (memoryTablesReady) {
-    return;
-  }
-
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS memory_nodes (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
-      type TEXT NOT NULL,
-      value TEXT NOT NULL,
-      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  await prisma.$executeRawUnsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS memory_nodes_user_type_value_idx
-    ON memory_nodes(user_id, type, value);
-  `);
-
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS memory_relations (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
-      source_id TEXT NOT NULL,
-      target_id TEXT NOT NULL,
-      relation_type TEXT NOT NULL,
-      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  await prisma.$executeRawUnsafe(`
-    CREATE INDEX IF NOT EXISTS memory_relations_user_id_idx
-    ON memory_relations(user_id, relation_type, created_at DESC);
-  `);
-
   memoryTablesReady = true;
 }
 
@@ -64,40 +29,65 @@ async function extractEntities(email) {
 }
 
 async function upsertMemoryNode(userId, type, value) {
-  await prisma.$executeRawUnsafe(
-    `
-      INSERT INTO memory_nodes (id, user_id, type, value, created_at)
-      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-      ON CONFLICT (user_id, type, value) DO NOTHING
-    `,
-    crypto.randomUUID(),
-    userId,
-    type,
-    value
-  );
+  const nodeName = String(value || '').trim();
+  const nodeType = String(type || '').toLowerCase();
+  
+  if (!nodeName) return null;
 
-  const rows = await prisma.$queryRawUnsafe(
-    'SELECT id, type, value FROM memory_nodes WHERE user_id = $1 AND type = $2 AND value = $3 LIMIT 1',
-    userId,
-    type,
-    value
-  );
+  try {
+    const node = await prisma.memoryNode.upsert({
+      where: {
+        userId_name_type: {
+          userId,
+          name: nodeName,
+          type: nodeType,
+        }
+      },
+      update: {},
+      create: {
+        id: crypto.randomUUID(),
+        userId,
+        name: nodeName,
+        type: nodeType,
+        metadata: {},
+      }
+    });
 
-  return rows?.[0] || null;
+    return {
+      id: node.id,
+      type: node.type,
+      value: node.name
+    };
+  } catch (error) {
+    console.error('Error in upsertMemoryNode:', error.message);
+    return null;
+  }
 }
 
 async function createRelation(userId, sourceId, targetId, relationType) {
-  await prisma.$executeRawUnsafe(
-    `
-      INSERT INTO memory_relations (id, user_id, source_id, target_id, relation_type, created_at)
-      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-    `,
-    crypto.randomUUID(),
-    userId,
-    sourceId,
-    targetId,
-    relationType
-  );
+  const relType = String(relationType || '').toLowerCase();
+  try {
+    await prisma.memoryRelation.upsert({
+      where: {
+        userId_sourceId_targetId_type: {
+          userId,
+          sourceId,
+          targetId,
+          type: relType,
+        }
+      },
+      update: {},
+      create: {
+        id: crypto.randomUUID(),
+        userId,
+        sourceId,
+        targetId,
+        type: relType,
+      }
+    });
+  } catch (error) {
+    console.error('Error in createRelation:', error.message);
+  }
 }
 
 async function buildMemoryGraph(email) {
@@ -144,22 +134,24 @@ async function queryMemory(question, userId) {
       .filter((token) => token.length > 2)
   );
 
-  const baseRows = await prisma.$queryRawUnsafe(
-    `
-      SELECT id, type, value, created_at AS "createdAt"
-      FROM memory_nodes
-      WHERE user_id = $1
-      ORDER BY created_at DESC
-      LIMIT 300
-    `,
-    userId
-  );
+  const nodes = await prisma.memoryNode.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: 300
+  });
+
+  const mapped = nodes.map(n => ({
+    id: n.id,
+    type: n.type,
+    value: n.name,
+    createdAt: n.createdAt
+  }));
 
   if (!keywords.length) {
-    return baseRows;
+    return mapped;
   }
 
-  return baseRows.filter((row) => {
+  return mapped.filter((row) => {
     const haystack = `${row.type} ${row.value}`.toLowerCase();
     return keywords.some((keyword) => haystack.includes(keyword));
   });
@@ -168,30 +160,61 @@ async function queryMemory(question, userId) {
 async function getMemoryGraphOverview(userId) {
   await ensureMemoryTables();
 
-  const [counts, relations] = await Promise.all([
-    prisma.$queryRawUnsafe(
-      `
-        SELECT type, COUNT(*)::int AS count
-        FROM memory_nodes
-        WHERE user_id = $1
-        GROUP BY type
-      `,
-      userId
-    ),
-    prisma.$queryRawUnsafe(
-      `
-        SELECT relation_type AS "relationType", COUNT(*)::int AS count
-        FROM memory_relations
-        WHERE user_id = $1
-        GROUP BY relation_type
-      `,
-      userId
-    ),
+  const [nodeCounts, relationCounts] = await Promise.all([
+    prisma.memoryNode.groupBy({
+      by: ['type'],
+      where: { userId },
+      _count: { _all: true }
+    }),
+    prisma.memoryRelation.groupBy({
+      by: ['type'],
+      where: { userId },
+      _count: { _all: true }
+    })
   ]);
 
   return {
-    nodesByType: counts,
-    relationsByType: relations,
+    nodesByType: nodeCounts.map(n => ({ type: n.type, count: n._count._all })),
+    relationsByType: relationCounts.map(r => ({ relationType: r.type, count: r._count._all })),
+  };
+}
+
+async function extractAndIndexEmailEntities(email) {
+  return buildMemoryGraph(email);
+}
+
+async function queryMemoryGraph(userId, question) {
+  await ensureMemoryTables();
+  const nodes = await queryMemory(question, userId);
+  
+  const relations = await prisma.memoryRelation.findMany({
+    where: { userId },
+    include: {
+      source: true,
+      target: true
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50
+  });
+
+  const edges = relations.map(r => ({
+    id: r.id,
+    source: r.sourceId,
+    target: r.targetId,
+    type: r.type
+  }));
+
+  const summary = `Found ${nodes.length} relevant context entities and ${relations.length} relationships mapping your inbox connections.`;
+
+  return {
+    summary,
+    nodes: nodes.map(n => ({
+      id: n.id,
+      name: n.value,
+      type: n.type.toLowerCase(),
+      createdAt: n.createdAt
+    })),
+    edges
   };
 }
 
@@ -200,4 +223,6 @@ module.exports = {
   extractEntities,
   getMemoryGraphOverview,
   queryMemory,
+  extractAndIndexEmailEntities,
+  queryMemoryGraph,
 };

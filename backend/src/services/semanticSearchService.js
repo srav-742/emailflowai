@@ -283,12 +283,17 @@ async function getSemanticStatus(userId, extras = {}) {
   };
 }
 
+async function searchSemantically(userId, query, limit = 10) {
+  return searchEmails(userId, query, { limit });
+}
+
 module.exports = {
   generateEmbedding,
   indexEmail,
   indexUserEmails,
   semanticSearch,
   searchEmails,
+  searchSemantically,
   getSemanticStatus,
   VECTOR_LENGTH,
 };

@@ -82,6 +82,18 @@ const Layout = () => {
     navigate('/login');
   };
 
+  const isDashboard = location.pathname === '/dashboard';
+
+  if (isDashboard) {
+    return (
+      <div className="app-shell" style={{ display: 'block', padding: 0, background: '#050505' }}>
+        <section style={{ height: '100vh', width: '100vw' }}>
+          <Outlet />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell" data-legacy-count={shellNavItems.length}>
       <aside className={`app-sidebar ${sidebarOpen ? 'expanded' : 'collapsed'}`}>

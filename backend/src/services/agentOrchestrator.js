@@ -4,27 +4,6 @@ const prisma = require('../config/database');
 let workflowTableReady = false;
 
 async function ensureWorkflowTable() {
-  if (workflowTableReady) {
-    return;
-  }
-
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS agent_workflow_approvals (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
-      type TEXT NOT NULL,
-      status TEXT NOT NULL,
-      explanation TEXT NOT NULL,
-      payload JSONB NOT NULL,
-      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  await prisma.$executeRawUnsafe(`
-    CREATE INDEX IF NOT EXISTS agent_workflow_approvals_user_status_idx
-    ON agent_workflow_approvals(user_id, status, created_at DESC);
-  `);
-
   workflowTableReady = true;
 }
 
@@ -68,43 +47,45 @@ async function detectWorkflow(email) {
 
   const created = [];
   for (const workflow of workflows) {
-    const duplicateRows = await prisma.$queryRawUnsafe(
-      `
-        SELECT id
-        FROM agent_workflow_approvals
-        WHERE user_id = $1
-          AND type = $2
-          AND status = 'PENDING'
-          AND payload->>'emailId' = $3
-        LIMIT 1
-      `,
-      email.userId,
-      workflow.type,
-      email.id
-    );
+    const existing = await prisma.agentWorkflowApproval.findFirst({
+      where: {
+        userId: email.userId,
+        triggerType: workflow.type,
+        status: 'pending',
+        emailId: email.id
+      }
+    });
 
-    if (duplicateRows.length) {
+    if (existing) {
       continue;
     }
 
-    // Keep default behavior approval-first and fully auditable.
     const workflowId = crypto.randomUUID();
-    await prisma.$executeRawUnsafe(
-      `
-        INSERT INTO agent_workflow_approvals (
-          id, user_id, type, status, explanation, payload, created_at
-        ) VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, CURRENT_TIMESTAMP)
-      `,
-      workflowId,
-      email.userId,
-      workflow.type,
-      workflow.explanation,
-      JSON.stringify({
+    let title = '';
+    if (workflow.type === 'MEETING_REPLY') {
+      title = `Schedule meeting with ${email.senderName || email.sender || 'Sender'}`;
+    } else if (workflow.type === 'PAYMENT_FOLLOWUP') {
+      title = `Process invoice/payment from ${email.senderName || email.sender || 'Sender'}`;
+    } else {
+      title = `Escalate operational incident from ${email.senderName || email.sender || 'Sender'}`;
+    }
+
+    const approval = await prisma.agentWorkflowApproval.create({
+      data: {
+        id: workflowId,
+        userId: email.userId,
         emailId: email.id,
-        subject: email.subject || null,
-        sender: email.sender || null,
-      })
-    );
+        triggerType: workflow.type,
+        title,
+        description: workflow.explanation,
+        status: 'pending',
+        actionData: {
+          emailId: email.id,
+          subject: email.subject || null,
+          sender: email.sender || null,
+        }
+      }
+    });
 
     created.push({
       id: workflowId,
@@ -113,7 +94,12 @@ async function detectWorkflow(email) {
       explanation: workflow.explanation,
       payload: {
         emailId: email.id,
+        subject: email.subject || null,
+        sender: email.sender || null,
       },
+      title,
+      triggerType: workflow.type,
+      description: workflow.explanation
     });
   }
 
@@ -127,51 +113,110 @@ async function detectWorkflow(email) {
 async function listWorkflows(userId, status = null) {
   await ensureWorkflowTable();
 
-  const rows = await prisma.$queryRawUnsafe(
-    `
-      SELECT id, type, status, explanation, payload, created_at AS "createdAt"
-      FROM agent_workflow_approvals
-      WHERE user_id = $1
-        AND ($2::text IS NULL OR status = $2::text)
-      ORDER BY created_at DESC
-      LIMIT 150
-    `,
-    userId,
-    status || null
-  );
+  const approvals = await prisma.agentWorkflowApproval.findMany({
+    where: {
+      userId,
+      status: status ? status.toLowerCase() : undefined
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 150
+  });
 
-  return rows.map((row) => ({
-    ...row,
-    payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload,
+  return approvals.map((appr) => ({
+    id: appr.id,
+    type: appr.triggerType,
+    status: appr.status.toUpperCase(),
+    explanation: appr.description || '',
+    payload: typeof appr.actionData === 'string' ? JSON.parse(appr.actionData) : appr.actionData,
+    createdAt: appr.createdAt,
+    title: appr.title,
+    description: appr.description,
+    triggerType: appr.triggerType,
+    actionData: appr.actionData
   }));
 }
 
 async function updateWorkflowStatus(userId, workflowId, status) {
   await ensureWorkflowTable();
 
-  const rows = await prisma.$queryRawUnsafe(
-    `
-      UPDATE agent_workflow_approvals
-      SET status = $1
-      WHERE id = $2
-        AND user_id = $3
-      RETURNING id, type, status, explanation, payload, created_at AS "createdAt"
-    `,
-    status,
-    workflowId,
-    userId
-  );
+  const approval = await prisma.agentWorkflowApproval.update({
+    where: {
+      id: workflowId,
+      userId
+    },
+    data: {
+      status: status.toLowerCase()
+    }
+  });
 
-  const row = rows?.[0] || null;
-  if (!row) {
+  if (!approval) {
     const error = new Error('Workflow not found');
     error.statusCode = 404;
     throw error;
   }
 
   return {
-    ...row,
-    payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload,
+    id: approval.id,
+    type: approval.triggerType,
+    status: approval.status.toUpperCase(),
+    explanation: approval.description || '',
+    payload: typeof approval.actionData === 'string' ? JSON.parse(approval.actionData) : approval.actionData,
+    createdAt: approval.createdAt,
+    title: approval.title,
+    description: approval.description,
+    triggerType: approval.triggerType,
+    actionData: approval.actionData
+  };
+}
+
+async function scanEmailForAgentActions(email) {
+  return detectWorkflow(email);
+}
+
+async function executeApprovedWorkflow(workflowId) {
+  const approval = await prisma.agentWorkflowApproval.findUnique({
+    where: { id: workflowId }
+  });
+
+  if (!approval) {
+    throw new Error(`Workflow proposal not found for ID: ${workflowId}`);
+  }
+
+  await prisma.agentWorkflowApproval.update({
+    where: { id: workflowId },
+    data: { status: 'approved' }
+  });
+
+  await prisma.calendarEvent.create({
+    data: {
+      id: crypto.randomUUID(),
+      userId: approval.userId,
+      googleEventId: `mock-event-${Date.now()}`,
+      calendarId: 'primary',
+      title: approval.title,
+      description: approval.description || 'Auto-created meeting from email flow',
+      startTime: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      endTime: new Date(Date.now() + 25 * 60 * 60 * 1000),
+      linkedEmailId: approval.emailId
+    }
+  });
+
+  await prisma.actionItem.create({
+    data: {
+      id: crypto.randomUUID(),
+      userId: approval.userId,
+      emailId: approval.emailId || crypto.randomUUID(),
+      title: approval.title,
+      description: approval.description || 'Action required from email',
+      status: 'pending',
+      priority: 'medium',
+      extractedAt: new Date()
+    }
+  });
+
+  return {
+    success: true,
+    message: `Workflow ${workflowId} approved and executed successfully.`
   };
 }
 
@@ -179,4 +224,6 @@ module.exports = {
   detectWorkflow,
   listWorkflows,
   updateWorkflowStatus,
+  scanEmailForAgentActions,
+  executeApprovedWorkflow,
 };

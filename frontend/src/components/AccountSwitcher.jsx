@@ -31,7 +31,7 @@ const AccountSwitcher = ({ sidebarOpen }) => {
           {sidebarOpen && (
             <span>
               <strong>{account.displayName || account.email.split('@')[0]}</strong>
-              <small>{account.email}</small>
+              <small>{account.email} · {account.emailCount || 0} emails</small>
             </span>
           )}
           {!sidebarOpen && <strong>{account.email.slice(0, 2).toUpperCase()}</strong>}

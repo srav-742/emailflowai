@@ -1,13 +1,40 @@
 const prisma = require('../config/database');
 
+function sanitizeAccount(account) {
+  return {
+    id: account.id,
+    userId: account.userId,
+    provider: account.provider,
+    email: account.email,
+    displayName: account.displayName,
+    isPrimary: account.isPrimary,
+    color: account.color,
+    syncEnabled: account.syncEnabled,
+    connectionType: account.connectionType,
+    imapHost: account.imapHost,
+    smtpHost: account.smtpHost,
+    lastSyncAt: account.lastSyncAt,
+    requiresReconnect: account.requiresReconnect,
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+    hasOAuthTokens: Boolean(account.accessToken || account.refreshToken),
+    emailCount: account._count?.emails || 0,
+  };
+}
+
 /**
  * List all connected email accounts for a user.
  */
 async function listAccounts(userId) {
-  return prisma.emailAccount.findMany({
+  const accounts = await prisma.emailAccount.findMany({
     where: { userId },
+    include: {
+      _count: { select: { emails: true } },
+    },
     orderBy: { createdAt: 'asc' },
   });
+
+  return accounts.map(sanitizeAccount);
 }
 
 /**
@@ -31,8 +58,11 @@ async function updateAccount(accountId, data) {
     }
   }
 
-  return prisma.emailAccount.update({
+  const updated = await prisma.emailAccount.update({
     where: { id: accountId },
+    include: {
+      _count: { select: { emails: true } },
+    },
     data: {
       ...(displayName !== undefined && { displayName }),
       ...(color !== undefined && { color }),
@@ -40,6 +70,8 @@ async function updateAccount(accountId, data) {
       ...(isPrimary !== undefined && { isPrimary }),
     },
   });
+
+  return sanitizeAccount(updated);
 }
 
 /**
@@ -140,4 +172,5 @@ module.exports = {
   listAccounts,
   updateAccount,
   disconnectAccount,
+  sanitizeAccount,
 };

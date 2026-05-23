@@ -23,11 +23,15 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(true);
-  const [activeTab, setActiveTab] = useState(filter.category || 'focus_today');
+  const [activeTab, setActiveTab] = useState(filter.category || 'all');
   const [liveMessage, setLiveMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'threads'
   const [selectedThreadId, setSelectedThreadId] = useState(null);
+  const filterPriority = filter.priority;
+  const filterActionRequired = filter.actionRequired;
+  const filterFollowUp = filter.followUp;
+  const filterCategoryIn = Array.isArray(filter.categoryIn) ? filter.categoryIn.join(',') : '';
 
   // 1. Activate real-time SSE stream
   useSSE((newEmails) => {
@@ -44,7 +48,11 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
       const params = {
         limit: pagination.limit,
         cursor: currentCursor,
-        category: activeTab,
+        ...(activeTab !== 'all' ? { category: activeTab } : {}),
+        ...(filterPriority ? { priority: filterPriority } : {}),
+        ...(filterActionRequired !== undefined ? { actionRequired: filterActionRequired } : {}),
+        ...(filterFollowUp !== undefined ? { followUp: filterFollowUp } : {}),
+        ...(filterCategoryIn ? { categoryIn: filterCategoryIn } : {}),
         ...(query ? { q: query } : {}),
         ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
       };
@@ -65,12 +73,13 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
 
       setCursor(data.pagination?.nextCursor || null);
       setHasMore(Boolean(data.pagination?.nextCursor));
+      setPagination((prev) => ({ ...prev, total: data.pagination?.total ?? newEmails.length }));
     } catch (error) {
       console.error('Failed to fetch emails:', error);
     } finally {
       setLoading(false);
     }
-  }, [activeTab, pagination.limit, query, setEmails, setLoading, viewMode, selectedAccountId]);
+  }, [activeTab, filterActionRequired, filterCategoryIn, filterFollowUp, filterPriority, pagination.limit, query, setEmails, setLoading, viewMode, selectedAccountId]);
 
   useEffect(() => {
     void fetchEmails(true);
@@ -191,6 +200,7 @@ const EmailList = ({ filter = {}, title = 'Inbox command center', description = 
 
       <InboxTabs 
         activeTab={activeTab} 
+        accountId={selectedAccountId}
         onTabChange={(tab) => {
           setActiveTab(tab);
           setCursor(null);

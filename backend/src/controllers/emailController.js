@@ -11,6 +11,7 @@ const { getOrCreateStyleProfile, refreshStyleProfileIfReady } = require('../serv
 const { emitEmailNotifications } = require('../services/notificationService');
 const { detectFollowUps } = require('../services/followUpService');
 const { getAuthenticatedGmailClient } = require('../services/tokenService');
+const { syncImapAccount, syncUserImapAccounts } = require('../services/imapSyncService');
 const { getUserSocketRoom } = require('../utils/socketRooms');
 const { getDownloadUrl } = require('../services/attachmentService');
 const StyleExtractor = require('../services/StyleExtractor');
@@ -61,7 +62,28 @@ async function logAIUsage(userId, options = {}) {
 
 const fetchEmails = async (req, res) => {
   try {
-    const result = await syncInbox(req.user.id, 100, { returnMeta: true });
+    const userId = req.user.id;
+    const googleAccountCount = await prisma.emailAccount.count({
+      where: {
+        userId,
+        provider: 'google',
+        syncEnabled: true,
+        OR: [
+          { accessToken: { not: null } },
+          { refreshToken: { not: null } },
+        ],
+      },
+    });
+
+    const result = googleAccountCount > 0
+      ? await syncInbox(userId, 100, { returnMeta: true })
+      : {
+          emails: await prisma.email.findMany({ where: { userId }, orderBy: { receivedAt: 'desc' }, take: 100 }),
+          newEmails: [],
+          degraded: false,
+          warning: null,
+        };
+
     res.json({
       emails: result.emails,
       newEmails: result.newEmails,
@@ -83,7 +105,11 @@ const getEmails = async (req, res) => {
 
     if (category === 'waiting') {
       const followUps = await prisma.followUp.findMany({
-        where: { userId, status: 'waiting' },
+        where: {
+          userId,
+          status: 'waiting',
+          ...(accountId ? { accountId: String(accountId) } : {}),
+        },
         include: { email: true },
         orderBy: { sentAt: 'desc' },
         take: Number(limit) + 1,
@@ -95,10 +121,17 @@ const getEmails = async (req, res) => {
         const nextItem = followUps.pop();
         nextCursor = nextItem.id;
       }
+      const total = await prisma.followUp.count({
+        where: {
+          userId,
+          status: 'waiting',
+          ...(accountId ? { accountId: String(accountId) } : {}),
+        },
+      });
 
       return res.json({
         emails: followUps.map(f => ({ ...f.email, followUpStatus: f.status })),
-        pagination: { nextCursor },
+        pagination: { nextCursor, total },
       });
     }
 
@@ -130,6 +163,7 @@ const getEmails = async (req, res) => {
       take: Number(limit) + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
+    const total = await prisma.email.count({ where });
 
     let nextCursor = null;
     if (emails.length > Number(limit)) {
@@ -139,7 +173,7 @@ const getEmails = async (req, res) => {
 
     res.json({
       emails,
-      pagination: { nextCursor },
+      pagination: { nextCursor, total },
     });
   } catch (error) {
     console.error('Get emails error:', error);
@@ -157,14 +191,16 @@ const getCategoryCounts = async (req, res) => {
     if (cached) return res.json(cached);
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [focusToday, readLater, newsletter, waiting] = await Promise.all([
-      prisma.email.count({ where: { userId, accountId: accountId || undefined, category: 'focus_today', isRead: false, receivedAt: { gte: twentyFourHoursAgo } } }),
-      prisma.email.count({ where: { userId, accountId: accountId || undefined, category: 'read_later', isRead: false } }),
-      prisma.email.count({ where: { userId, accountId: accountId || undefined, category: 'newsletter', isRead: false } }),
-      prisma.followUp.count({ where: { userId, accountId: accountId || undefined, status: 'waiting' } }),
+    const accountFilter = accountId ? { accountId: String(accountId) } : {};
+    const [all, focusToday, readLater, newsletter, waiting] = await Promise.all([
+      prisma.email.count({ where: { userId, ...accountFilter } }),
+      prisma.email.count({ where: { userId, ...accountFilter, category: 'focus_today', isRead: false, receivedAt: { gte: twentyFourHoursAgo } } }),
+      prisma.email.count({ where: { userId, ...accountFilter, category: 'read_later', isRead: false } }),
+      prisma.email.count({ where: { userId, ...accountFilter, category: 'newsletter', isRead: false } }),
+      prisma.followUp.count({ where: { userId, ...accountFilter, status: 'waiting' } }),
     ]);
 
-    const counts = { focus_today: focusToday, read_later: readLater, newsletter: newsletter, waiting };
+    const counts = { all, focus_today: focusToday, read_later: readLater, newsletter: newsletter, waiting };
     await cache.set(cacheKey, counts, 300); // 5 min TTL
     
     res.json(counts);
@@ -202,7 +238,7 @@ const getThreads = async (req, res) => {
     
     const where = {
       userId: req.user.id,
-      ...(accountId ? { accountId: String(accountId) } : {}),
+      ...(accountId ? { emails: { some: { accountId: String(accountId) } } } : {}),
       ...(priority ? { priority: String(priority) } : {}),
       ...(category ? { category: String(category) } : {}),
     };
@@ -465,8 +501,63 @@ const getStats = async (req, res) => {
 const syncEmails = async (req, res) => {
   try {
     const { accountId } = { ...req.query, ...req.body };
-    const result = await syncInbox(req.user.id, 100, { returnMeta: true, accountId });
+    const userId = req.user.id;
     const io = req.app.get('io');
+    let result;
+    let imapSyncSummary = null;
+
+    if (accountId) {
+      const account = await prisma.emailAccount.findFirst({
+        where: { id: String(accountId), userId },
+        select: { id: true, connectionType: true },
+      });
+
+      if (!account) {
+        return res.status(404).json({ error: 'Email account not found' });
+      }
+
+      if (['imap', 'app_password'].includes(account.connectionType)) {
+        imapSyncSummary = await syncImapAccount(userId, account.id, { limit: 100 });
+        const emails = await prisma.email.findMany({
+          where: { userId, accountId: account.id },
+          orderBy: { receivedAt: 'desc' },
+          take: 100,
+        });
+        result = { emails, newEmails: [], degraded: false, warning: null };
+      } else {
+        result = await syncInbox(userId, 100, { returnMeta: true, accountId });
+      }
+    } else {
+      imapSyncSummary = await syncUserImapAccounts(userId, { limit: 100 });
+
+      const googleAccountCount = await prisma.emailAccount.count({
+        where: {
+          userId,
+          provider: 'google',
+          syncEnabled: true,
+          OR: [
+            { accessToken: { not: null } },
+            { refreshToken: { not: null } },
+          ],
+        },
+      });
+
+      if (googleAccountCount > 0) {
+        result = await syncInbox(userId, 100, { returnMeta: true });
+      } else {
+        const emails = await prisma.email.findMany({
+          where: { userId },
+          orderBy: { receivedAt: 'desc' },
+          take: 100,
+        });
+        result = { emails, newEmails: [], degraded: false, warning: null };
+      }
+    }
+
+    await cache.del(`inbox:counts:${userId}`);
+    if (accountId) {
+      await cache.del(`inbox:counts:${userId}:${accountId}`);
+    }
 
     if (result.newEmails.length > 0) {
       const user = await prisma.user.findUnique({
@@ -500,6 +591,7 @@ const syncEmails = async (req, res) => {
       newCount: result.newEmails.length,
       emails: result.emails,
       newEmails: result.newEmails,
+      imapSync: imapSyncSummary,
       degraded: Boolean(result.degraded),
       warning: result.warning || null,
     });

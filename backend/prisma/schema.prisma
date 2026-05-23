@@ -15,6 +15,7 @@ model User {
   profileImage      String?            @map("profile_image")
   oauthProvider     String?            @map("oauth_provider")
   firebaseUid       String?            @map("firebase_uid")
+  clerkUserId       String?            @unique @map("clerk_user_id")
   stripeCustomerId  String?            @map("stripe_customer_id")
   accessToken       String?            @map("access_token")
   refreshToken      String?            @map("refresh_token")
@@ -208,20 +209,37 @@ model Thread {
 }
 
 model EmailAccount {
-  id           String       @id @default(uuid())
-  userId       String       @map("user_id")
-  provider     String       @default("gmail")
-  email        String
-  displayName  String?      @map("display_name")
-  isPrimary    Boolean      @default(false) @map("is_primary")
-  color        String?
-  syncEnabled  Boolean      @default(true) @map("sync_enabled")
-  accessToken  String?      @map("access_token")
-  refreshToken String?      @map("refresh_token")
-  tokenExpiry  DateTime?    @map("token_expiry")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
+  id               String       @id @default(uuid())
+  userId           String       @map("user_id")
+  provider         String       @default("gmail")
+  email            String
+  displayName      String?      @map("display_name")
+  isPrimary        Boolean      @default(false) @map("is_primary")
+  color            String?
+  syncEnabled      Boolean      @default(true) @map("sync_enabled")
+  connectionType   String       @default("oauth") @map("connection_type") // "oauth", "imap", "app_password"
+
+  // OAuth fields (kept for Gmail OAuth / Microsoft Graph)
+  accessToken      String?      @map("access_token")
+  refreshToken     String?      @map("refresh_token")
+  tokenExpiry      DateTime?    @map("token_expiry")
+
+  // IMAP configuration (all passwords stored AES-256-GCM encrypted)
+  imapHost         String?      @map("imap_host")
+  imapPort         Int?         @map("imap_port")
+  imapUsername     String?      @map("imap_username")
+  imapPassword     String?      @map("imap_password")    // AES-256-GCM encrypted
+
+  // SMTP configuration (all passwords stored AES-256-GCM encrypted)
+  smtpHost         String?      @map("smtp_host")
+  smtpPort         Int?         @map("smtp_port")
+  smtpUsername     String?      @map("smtp_username")
+  smtpPassword     String?      @map("smtp_password")    // AES-256-GCM encrypted
+
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
   lastSyncAt       DateTime?    @map("last_sync_at")
+  lastImapUid      Int?         @map("last_imap_uid")     // Incremental IMAP sync cursor
   requiresReconnect Boolean     @default(false) @map("requires_reconnect")
   actionItems      ActionItem[]
   user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)

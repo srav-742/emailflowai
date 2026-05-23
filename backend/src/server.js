@@ -211,6 +211,18 @@ app.use((req, res, next) => {
 // Stripe webhooks need raw body, so we place it before express.json()
 app.use('/api/webhooks', webhookRoutes);
 
+// Intercept Bull Board responses to strip Link preload headers to prevent browser console warnings
+app.use('/admin/queues', (req, res, next) => {
+  const originalSetHeader = res.setHeader;
+  res.setHeader = function (name, value) {
+    if (name.toLowerCase() === 'link' && typeof value === 'string' && value.includes('rel=preload')) {
+      return this; // Skip setting this header
+    }
+    return originalSetHeader.call(this, name, value);
+  };
+  next();
+});
+
 // Bull Board Queue Dashboard — http://localhost:<PORT>/admin/queues
 app.use('/admin/queues', bullBoardAdapter.getRouter());
 
@@ -257,6 +269,7 @@ app.use('/api/agent', require('./routes/agentRoutes'));
 app.use('/api/semantic', semanticRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api', require('./routes/test.route'));
+app.use('/api/mail', require('./routes/mailRoutes'));
 
 // Transitioned: Analytics and Digest scheduling moved to BullMQ Scheduler in initRepeatableJobs.js
 

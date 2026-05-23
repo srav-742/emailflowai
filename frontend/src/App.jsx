@@ -2,8 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
-import Login from './pages/Login';
-import GmailConnect from './pages/GmailConnect';
+import SignIn from './pages/SignIn';
 import GmailCallback from './pages/GmailCallback';
 import LandingPage from './pages/LandingPage';
 import Dashboard from './pages/Dashboard';
@@ -30,7 +29,7 @@ const LoadingScreen = ({ message = 'Loading EmailFlow AI...' }) => (
 const ProtectedRoute = ({ children }) => {
   const { token, loading } = useAuth();
   if (loading) return <LoadingScreen />;
-  return token ? children : <Navigate to="/login" replace />;
+  return token ? children : <Navigate to="/signin" replace />;
 };
 
 const PublicRoute = ({ children }) => {
@@ -42,7 +41,7 @@ const PublicRoute = ({ children }) => {
 const HomeRoute = () => {
   const { token, loading } = useAuth();
   if (loading) return <LoadingScreen message="Preparing your workspace..." />;
-  return token ? <Navigate to="/dashboard" replace /> : <LandingPage />;
+  return token ? <Navigate to="/dashboard" replace /> : <SignIn />;
 };
 
 function App() {
@@ -51,18 +50,19 @@ function App() {
       <Routes>
         <Route path="/" element={<HomeRoute />} />
         <Route
-          path="/login"
+          path="/signin"
           element={
             <PublicRoute>
-              <Login />
+              <SignIn />
             </PublicRoute>
           }
         />
+        <Route path="/login" element={<Navigate to="/signin" replace />} />
         <Route
           path="/auth/gmail-connect"
           element={
             <ProtectedRoute>
-              <GmailConnect />
+              <Navigate to="/settings/accounts" replace />
             </ProtectedRoute>
           }
         />

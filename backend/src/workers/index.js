@@ -16,6 +16,7 @@ console.log('================================================');
 // Import all workers — they self-register on import
 const { aiWorker } = require('./ai.worker');
 const { gmailWorker } = require('./gmail.worker');
+const { mailSyncWorker } = require('./mail-sync.worker');
 const { analyticsWorker } = require('./analytics.worker');
 const { notificationWorker } = require('./notification.worker');
 const { schedulerWorker } = require('./scheduler.worker');
@@ -24,6 +25,7 @@ console.log('================================================');
 console.log('✅ [Workers] All workers started successfully:');
 console.log(`  🤖 AI Worker         (ai-processing)        — status: active | concurrency: 5`);
 console.log(`  📧 Gmail Worker      (gmail-sync)            — status: active | concurrency: 3`);
+console.log(`  📬 Mail Sync Worker  (mail-sync)             — status: active | concurrency: 3`);
 console.log(`  📊 Analytics Worker  (analytics-processing)  — status: active | concurrency: 2`);
 console.log(`  🔔 Notification Worker (notification-delivery) — status: active | concurrency: 10`);
 console.log(`  ⏰ Scheduler Worker  (scheduler)             — status: active | concurrency: 2`);
@@ -37,6 +39,7 @@ async function gracefulShutdown(signal) {
   await Promise.allSettled([
     aiWorker.close(),
     gmailWorker.close(),
+    mailSyncWorker.close(),
     analyticsWorker.close(),
     notificationWorker.close(),
     schedulerWorker.close(),

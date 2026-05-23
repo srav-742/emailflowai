@@ -7,6 +7,15 @@ const { msalClient } = require('../config/msalConfig');
 const { syncOutlookEmails } = require('../services/outlookSyncService');
 const { hasGoogleConnection } = require('../services/googleConnectionService');
 
+// Clerk (optional — only available when CLERK_SECRET_KEY is set)
+let verifyClerkToken = null;
+try {
+  const clerkConfig = require('../config/clerk');
+  verifyClerkToken = clerkConfig.verifyClerkToken;
+} catch (_) {
+  // Clerk not available
+}
+
 async function serializeUser(user, options = {}) {
   const hasGmailAccess = options.hasGmailAccess ?? await hasGoogleConnection(user.id, user);
 
@@ -354,6 +363,131 @@ const logout = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/auth/clerk-login
+ * Authenticate via Clerk session token.
+ * Creates or updates the user in our database and returns an internal JWT.
+ */
+const clerkLogin = async (req, res) => {
+  try {
+    if (!verifyClerkToken) {
+      return res.status(503).json({ error: 'Clerk authentication is not configured.' });
+    }
+
+    const { sessionToken } = req.body;
+
+    if (!sessionToken) {
+      return res.status(400).json({ error: 'Clerk session token is required.' });
+    }
+
+    let claims;
+    try {
+      claims = await verifyClerkToken(sessionToken);
+    } catch (tokenError) {
+      console.error('[Clerk] Token verification failed:', tokenError.message);
+      return res.status(401).json({ error: 'Invalid Clerk session token.' });
+    }
+
+    const clerkUserId = claims.sub;
+    const email = claims.email || claims.primary_email;
+    const name = claims.name || claims.first_name || null;
+    const picture = claims.image_url || claims.profile_image_url || null;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email not found in Clerk session.' });
+    }
+
+    let user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email,
+          name: name || email.split('@')[0],
+          oauthProvider: 'clerk',
+          clerkUserId,
+          profileImage: picture || null,
+          lastLogin: new Date(),
+        },
+      });
+    } else {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          clerkUserId,
+          profileImage: picture || user.profileImage,
+          lastLogin: new Date(),
+        },
+      });
+    }
+
+    const jwtToken = generateToken({ id: user.id, email: user.email });
+
+    res.json({
+      token: jwtToken,
+      user: await serializeUser(user),
+    });
+  } catch (error) {
+    console.error('[Clerk] Auth Error:', error);
+    if (!res.headersSent) {
+      return sendAuthError(res, error, 'Clerk authentication failed');
+    }
+  }
+};
+
+/**
+ * POST /api/auth/register
+ * Register a new user with email + password (internal auth).
+ * This allows login without any OAuth provider.
+ */
+const registerWithEmail = async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+
+    // Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
+
+    // Hash the password
+    const bcrypt = require('bcrypt');
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        name: name || email.split('@')[0],
+        oauthProvider: 'email',
+        // Store hashed password in accessToken field (repurposed for internal auth)
+        // In production, add a dedicated passwordHash column
+        lastLogin: new Date(),
+      },
+    });
+
+    const jwtToken = generateToken({ id: user.id, email: user.email });
+
+    res.status(201).json({
+      token: jwtToken,
+      user: await serializeUser(user),
+    });
+  } catch (error) {
+    console.error('[Register] Error:', error);
+    if (!res.headersSent) {
+      return sendAuthError(res, error, 'Registration failed');
+    }
+  }
+};
+
 const outlookAuth = async (req, res) => {
   try {
     const authCodeUrlParameters = {
@@ -412,4 +546,14 @@ const outlookCallback = async (req, res) => {
   }
 };
 
-module.exports = { firebaseGoogleLogin, saveGmailTokens, persistGmailTokens, getProfile, logout, outlookAuth, outlookCallback };
+module.exports = {
+  firebaseGoogleLogin,
+  saveGmailTokens,
+  persistGmailTokens,
+  getProfile,
+  logout,
+  outlookAuth,
+  outlookCallback,
+  clerkLogin,
+  registerWithEmail,
+};

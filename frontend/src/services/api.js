@@ -46,7 +46,11 @@ export const authAPI = {
   connectGmail: (tokens) => api.post('/auth/gmail/connect', { tokens }),
   getProfile: () => api.get('/auth/profile'),
   logout: () => api.post('/auth/logout'),
+  registerAndSendOtp: ({ name, email, password }) => api.post('/auth/register-otp', { name, email, password }),
+  verifyOtp: ({ email, otp }) => api.post('/auth/verify-otp', { email, otp }),
+  resendOtp: ({ email }) => api.post('/auth/resend-otp', { email }),
 };
+
 
 // Email APIs
 export const emailAPI = {
@@ -67,8 +71,15 @@ export const emailAPI = {
   aiClassify: (id) => api.post(`/emails/ai/${id}/classify`),
   aiGenerateReply: (id, tone = 'professional', intent = 'general') => api.post(`/emails/ai/${id}/reply`, { tone, intent }),
   aiProcessAll: () => api.post('/emails/ai/process-all'),
-  getCategoryCounts: () => api.get('/emails/counts'),
+  getCategoryCounts: (params = {}) => api.get('/emails/counts', { params }),
   updateEmailCategory: (id, category) => api.patch(`/emails/${id}/category`, { category }),
+};
+
+export const mailAPI = {
+  connect: (data) => api.post('/mail/connect', data),
+  testConnection: (data) => api.post('/mail/test-connection', data),
+  detectProvider: (email) => api.get('/mail/detect-provider', { params: { email } }),
+  providers: () => api.get('/mail/providers'),
 };
 
 export const aiAPI = {

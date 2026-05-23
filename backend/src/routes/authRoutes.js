@@ -48,6 +48,12 @@ async function handleGmailCallback(req, res) {
 
 router.post('/firebase-login', asyncHandler(firebaseGoogleLogin));
 
+// OTP-based email authentication
+const { registerAndSendOtp, verifyOtpHandler, resendOtp } = require('../controllers/otpAuthController');
+router.post('/register-otp', asyncHandler(registerAndSendOtp));
+router.post('/verify-otp', asyncHandler(verifyOtpHandler));
+router.post('/resend-otp', asyncHandler(resendOtp));
+
 router.get('/gmail/url', authenticate, (req, res) => {
   res.json(buildGmailAuthPayload(req.user.id));
 });

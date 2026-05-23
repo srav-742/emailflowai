@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { useAccounts } from '../../context/AccountContext';
 import { useAuth } from '../../context/AuthContext';
+import { mailAPI } from '../../services/api';
 import { subscribeToPush, unsubscribeFromPush } from '../../utils/pushSubscribe';
 
 const AccountSettings = () => {
-  const { accounts, updateAccountSettings, disconnectAccount } = useAccounts();
+  const { accounts, updateAccountSettings, disconnectAccount, fetchAccounts } = useAccounts();
   const { token, gmailReconnectState } = useAuth();
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({});
   const [pushLoading, setPushLoading] = useState(false);
   const [pushEnabled, setPushEnabled] = useState('Notification' in window && Notification.permission === 'granted');
+  const [connectData, setConnectData] = useState({ email: '', password: '', otp: '', displayName: '' });
+  const [connectStatus, setConnectStatus] = useState({ tone: '', text: '' });
+  const [connectLoading, setConnectLoading] = useState(false);
 
   const handleEdit = (account) => {
     setEditingId(account.id);
@@ -37,12 +41,38 @@ const AccountSettings = () => {
     setPushLoading(false);
   };
 
+  const handleConnectMail = async (event) => {
+    event.preventDefault();
+    setConnectLoading(true);
+    setConnectStatus({ tone: '', text: '' });
+
+    try {
+      await mailAPI.connect({
+        email: connectData.email.trim(),
+        password: (connectData.otp || connectData.password).trim(),
+        displayName: connectData.displayName.trim() || undefined,
+        connectionType: 'app_password',
+      });
+
+      setConnectData({ email: '', password: '', otp: '', displayName: '' });
+      await fetchAccounts();
+      setConnectStatus({ tone: 'success', text: 'Mailbox connected. Run Sync now in the inbox to load the latest messages.' });
+    } catch (error) {
+      setConnectStatus({
+        tone: 'error',
+        text: error.response?.data?.error || error.response?.data?.details?.error || 'Could not connect this mailbox. Check the email and app password/OTP.',
+      });
+    } finally {
+      setConnectLoading(false);
+    }
+  };
+
   return (
     <div className="settings-container">
       <div className="surface-card">
         <span className="eyebrow">Workspace management</span>
-        <h2>Gmail Accounts</h2>
-        <p>Manage your connected Gmail accounts and their sync settings.</p>
+        <h2>Email Accounts</h2>
+        <p>Manage connected mailboxes and their sync settings.</p>
 
         <div className="account-list" style={{ marginTop: '2rem' }}>
           {accounts.map(account => (
@@ -91,7 +121,7 @@ const AccountSettings = () => {
                     </div>
                     {account.reconnectRequired ? (
                       <p style={{ marginTop: '0.75rem', color: 'var(--warning)', fontSize: '0.9rem' }}>
-                        Gmail access expired for this account. Reconnect to resume background sync and calendar updates.
+                        OAuth access expired for this account. Reconnect to resume background sync and calendar updates.
                       </p>
                     ) : null}
                   </div>
@@ -112,10 +142,57 @@ const AccountSettings = () => {
 
         <div style={{ marginTop: '2rem', padding: '1.5rem', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '12px', border: '1px dashed rgba(99, 102, 241, 0.3)' }}>
           <h3>Add another account</h3>
-          <p>You can connect multiple Gmail accounts to view them all in one unified dashboard.</p>
-          <button className="button button-primary" onClick={() => window.location.href = '/auth/gmail-connect'}>
-            Connect New Gmail Account
-          </button>
+          <p>Use the mailbox email and password, app password, or OTP provided by your mail provider.</p>
+          {connectStatus.text ? (
+            <div className={`inline-alert ${connectStatus.tone === 'error' ? 'error-alert' : 'success-alert'}`} style={{ marginBottom: '1rem' }}>
+              {connectStatus.text}
+            </div>
+          ) : null}
+          <form onSubmit={handleConnectMail} style={{ display: 'grid', gap: '1rem' }}>
+            <div className="form-group">
+              <label>Email address</label>
+              <input
+                className="search-input"
+                type="email"
+                value={connectData.email}
+                onChange={(event) => setConnectData({ ...connectData, email: event.target.value })}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label>Mailbox password</label>
+              <input
+                className="search-input"
+                type="password"
+                value={connectData.password}
+                onChange={(event) => setConnectData({ ...connectData, password: event.target.value })}
+                placeholder="Normal password or app password"
+              />
+            </div>
+            <div className="form-group">
+              <label>OTP / app password</label>
+              <input
+                className="search-input"
+                type="password"
+                value={connectData.otp}
+                onChange={(event) => setConnectData({ ...connectData, otp: event.target.value })}
+                placeholder="Used instead of password when entered"
+              />
+            </div>
+            <div className="form-group">
+              <label>Display name</label>
+              <input
+                className="search-input"
+                type="text"
+                value={connectData.displayName}
+                onChange={(event) => setConnectData({ ...connectData, displayName: event.target.value })}
+                placeholder="Optional"
+              />
+            </div>
+            <button className="button button-primary" type="submit" disabled={connectLoading || !connectData.email || (!connectData.password && !connectData.otp)}>
+              {connectLoading ? 'Connecting...' : 'Connect Mailbox'}
+            </button>
+          </form>
         </div>
 
         {gmailReconnectState?.required ? (

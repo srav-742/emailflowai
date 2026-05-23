@@ -9,8 +9,8 @@ function decorateAccount(account) {
   const reconnectRequired = (
     account?.provider === 'google' &&
     account?.syncEnabled === false &&
-    !account?.accessToken &&
-    !account?.refreshToken
+    account?.connectionType === 'oauth' &&
+    !account?.hasOAuthTokens
   );
 
   return {

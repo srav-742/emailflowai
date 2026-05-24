@@ -4,6 +4,7 @@ import { aiAPI, emailAPI, authAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useAccounts } from '../context/AccountContext';
 import PricingPage from './PricingPage';
+import DocumentIntelligencePage from './DocumentIntelligencePage';
 import EmailCard from '../components/EmailCard';
 import ActionItemsPanel from '../components/ActionItemsPanel';
 import WaitingList from '../components/WaitingList';
@@ -27,8 +28,8 @@ const mergeIncomingEmails = (currentEmails, incomingEmails) => {
 };
 
 const Dashboard = () => {
-  const { user, refreshProfile, gmailReconnectState, logout } = useAuth();
-  const { accounts, selectedAccountId, setSelectedAccountId } = useAccounts();
+  const { user, refreshProfile, gmailReconnectState, logout, markGmailReconnectRequired } = useAuth();
+  const { accounts, selectedAccountId, setSelectedAccountId, fetchAccounts } = useAccounts();
   const navigate = useNavigate();
   
   const handleLogout = async () => {
@@ -221,16 +222,46 @@ const Dashboard = () => {
     };
 
     const handleInboxSummary = (data) => { if (data?.executive_summary) setInboxSummary(data); };
+    const handleSyncComplete = () => {
+      setNotice({ tone: 'ok', text: 'Google sync completed.' });
+      void refreshWorkspace();
+      void fetchAccounts();
+    };
+    const handleQueueNewEmail = ({ count = 1 } = {}) => {
+      setNotice({ tone: 'ok', text: `${count} new email${count === 1 ? '' : 's'} synced.` });
+      void refreshWorkspace();
+    };
+    const handleSyncError = ({ message } = {}) => {
+      setNotice({ tone: 'warn', text: message || 'Google sync hit a recoverable issue.' });
+      void fetchAccounts();
+    };
+    const handleAccountReauth = ({ message } = {}) => {
+      markGmailReconnectRequired({
+        message: message || 'Google access needs to be reconnected before sync can continue.',
+        source: 'socket',
+      });
+      void fetchAccounts();
+    };
 
     socket.on('new-emails', handleNewEmails);
     socket.on('inbox-summary', handleInboxSummary);
+    socket.on('email:new', handleQueueNewEmail);
+    socket.on('sync:complete', handleSyncComplete);
+    socket.on('sync:error', handleSyncError);
+    socket.on('account:reauth', handleAccountReauth);
+    socket.on('calendar:updated', handleSyncComplete);
 
     return () => {
       socket.off('new-emails', handleNewEmails);
       socket.off('inbox-summary', handleInboxSummary);
+      socket.off('email:new', handleQueueNewEmail);
+      socket.off('sync:complete', handleSyncComplete);
+      socket.off('sync:error', handleSyncError);
+      socket.off('account:reauth', handleAccountReauth);
+      socket.off('calendar:updated', handleSyncComplete);
       disconnectSocket();
     };
-  }, [fetchInboxSummary, fetchStats, refreshProfile, user?.hasGmailAccess, user?.id]);
+  }, [fetchAccounts, fetchInboxSummary, fetchStats, markGmailReconnectRequired, refreshProfile, refreshWorkspace, user?.hasGmailAccess, user?.id]);
 
   const handleProcessAI = async () => {
     try {
@@ -596,6 +627,9 @@ const Dashboard = () => {
           <div className={`cockpit-nav-item ${activeView === 'pricing' ? 'active' : ''}`} onClick={() => { setActiveView('pricing'); setSelectedEmail(null); }}>
             <span className="nav-icon">💎</span> Upgrade & Pricing
           </div>
+          <div className={`cockpit-nav-item ${activeView === 'documents' ? 'active' : ''}`} onClick={() => { setActiveView('documents'); setSelectedEmail(null); }}>
+            <span className="nav-icon">📄</span> Document Intel Hub
+          </div>
 
           <span className="sidebar-section-title" style={{ marginTop: '1.25rem', display: 'block' }}>Connected Channels</span>
           <div className="connected-channels-list" style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '140px', overflowY: 'auto', paddingRight: '4px' }}>
@@ -666,6 +700,7 @@ const Dashboard = () => {
                 {activeView === 'search' && 'Semantic Vector Search Console'}
                 {activeView === 'agents' && 'Autonomous AI Agent Pipelines'}
                 {activeView === 'analytics' && 'Operational Productivity Telemetry'}
+                {activeView === 'documents' && 'Document Intelligence Hub'}
               </h2>
             </div>
             
@@ -1106,6 +1141,13 @@ const Dashboard = () => {
             {activeView === 'pricing' && (
               <div className="pricing-view-wrapper" style={{ animation: 'fadeInCockpit 0.3s ease-out' }}>
                 <PricingPage />
+              </div>
+            )}
+
+            {/* 8. DOCUMENT INTELLIGENCE HUB */}
+            {activeView === 'documents' && (
+              <div className="document-intel-deck" style={{ animation: 'fadeInCockpit 0.3s ease-out' }}>
+                <DocumentIntelligencePage />
               </div>
             )}
 

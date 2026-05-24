@@ -1,62 +1,128 @@
-/**
- * tokenService.js
- *
- * Centralises OAuth token lifecycle management for Gmail.
- *
- * Why this exists:
- *   Google OAuth access tokens expire after ~1 hour. Without explicit refresh
- *   logic that persists the new token back to the database, any email sync or
- *   send operation that runs in a session older than 1 hour silently fails with
- *   a 401 from Google's API.
- *
- * Strategy:
- *   - Proactively refresh the token when it is within 5 minutes of expiry
- *     (not just when it has already expired) to avoid mid-operation failures.
- *   - Write the refreshed access_token + expiry_date back to the User row so
- *     every subsequent call within the same session picks up the fresh token.
- */
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const prisma = require('../config/database');
 
-const { getAuthClient, getGmailClient } = require('../lib/google/getAuthClient');
-const { createReconnectError, resolveGoogleAccountEmail } = require('./googleConnectionService');
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
+const ACCESS_TOKEN_EXPIRY = '1h'; // Short-lived access token
+const REFRESH_TOKEN_TTL_DAYS = 30; // 30 days refresh token
 
 /**
- * Returns a valid (non-expiring) access token for the given user.
- *
- * Algorithm:
- *   1. Load the user row (accessToken, refreshToken, tokenExpiry).
- *   2. If tokenExpiry is null, assume the token is still valid (legacy row
- *      that was stored before expiry tracking was added) and return it as-is.
- *   3. If the token expires within EXPIRY_BUFFER_MS, call Google's token
- *      endpoint using the refresh_token.
- *   4. Persist the new access_token and expiry_date back to the DB.
- *   5. Return the fresh access_token.
- *
- * @param {string} userId  - Primary key of the User record.
- * @returns {Promise<string>} A valid Google OAuth access token.
- * @throws  Will throw if the user has no refresh token (not connected) or if
- *          the Google token refresh call fails.
+ * Generate a short-lived Access Token (JWT).
  */
-/**
- * Returns a valid (non-expiring) access token for the given account or user.
- */
-async function getValidAccessToken(userId, accountId = null) {
-  const email = await resolveGoogleAccountEmail(userId, accountId);
-  if (!email) throw createReconnectError('No connected Gmail account found. Please reconnect Gmail.');
-
-  // getAuthClient handles the auto-refresh and database update
-  const auth = await getAuthClient(userId, email);
-  const credentials = await auth.getAccessToken();
-  return credentials.token;
+function generateAccessToken(user) {
+  return jwt.sign(
+    { id: user.id, email: user.email },
+    JWT_SECRET,
+    { expiresIn: ACCESS_TOKEN_EXPIRY }
+  );
 }
 
 /**
- * Convenience helper: builds an authenticated Gmail client.
+ * Create a new user session and store a secure Refresh Token in the database.
  */
-async function getAuthenticatedGmailClient(userId, accountId = null) {
-  const email = await resolveGoogleAccountEmail(userId, accountId);
-  if (!email) throw createReconnectError('No connected Gmail account found. Please reconnect Gmail.');
+async function createSession(userId, ipAddress, deviceInfo) {
+  const refreshToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_TTL_DAYS);
 
-  return await getGmailClient(userId, email);
+  await prisma.authSession.create({
+    data: {
+      userId,
+      refreshToken,
+      ipAddress,
+      deviceInfo,
+      expiresAt
+    }
+  });
+
+  return refreshToken;
 }
 
-module.exports = { getValidAccessToken, getAuthenticatedGmailClient };
+/**
+ * Perform refresh token rotation:
+ * Verifies the old refresh token, deletes it, and issues a new Access & Refresh token pair.
+ */
+async function rotateSession(oldRefreshToken, ipAddress, deviceInfo) {
+  // Find the active session in the database
+  const session = await prisma.authSession.findUnique({
+    where: { refreshToken: oldRefreshToken },
+    include: { user: true }
+  });
+
+  if (!session) {
+    throw new Error('Invalid refresh token session. Please log in again.');
+  }
+
+  // Check if session has expired
+  if (new Date() > session.expiresAt) {
+    await prisma.authSession.delete({ where: { id: session.id } });
+    throw new Error('Refresh token has expired. Please log in again.');
+  }
+
+  // Generate a new secure refresh token
+  const newRefreshToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_TTL_DAYS);
+
+  // Use a transaction to safely rotate the session: delete the old session and create a new one
+  await prisma.$transaction([
+    prisma.authSession.delete({
+      where: { id: session.id }
+    }),
+    prisma.authSession.create({
+      data: {
+        userId: session.userId,
+        refreshToken: newRefreshToken,
+        ipAddress: ipAddress || session.ipAddress,
+        deviceInfo: deviceInfo || session.deviceInfo,
+        expiresAt
+      }
+    })
+  ]);
+
+  // Generate a fresh access token
+  const accessToken = generateAccessToken(session.user);
+
+  return {
+    accessToken,
+    refreshToken: newRefreshToken,
+    user: {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      plan: session.user.plan || 'free'
+    }
+  };
+}
+
+/**
+ * Revoke/delete a user session (Logout).
+ */
+async function revokeSession(refreshToken) {
+  try {
+    await prisma.authSession.delete({
+      where: { refreshToken }
+    });
+    return true;
+  } catch (error) {
+    // If it's already deleted or doesn't exist, ignore
+    return false;
+  }
+}
+
+/**
+ * Revoke all sessions for a user (Security lock).
+ */
+async function revokeAllUserSessions(userId) {
+  await prisma.authSession.deleteMany({
+    where: { userId }
+  });
+}
+
+module.exports = {
+  generateAccessToken,
+  createSession,
+  rotateSession,
+  revokeSession,
+  revokeAllUserSessions
+};

@@ -42,6 +42,7 @@ const { generalLimiter, aiLimiter } = require('./middleware/rateLimiter');
 const redis = require('./redisClient');
 const { startStyleLearningJob } = require('./jobs/styleLearningJob');
 const { serverAdapter: bullBoardAdapter } = require('./config/bullBoard');
+const { registerGoogleSyncRealtime } = require('./realtime/googleSyncEvents');
 
 
 const app = express();
@@ -145,6 +146,7 @@ const io = new Server(server, {
     credentials: true,
   },
 });
+registerGoogleSyncRealtime(io);
 
 // Authenticate the socket once so each connection can safely join its own user room.
 io.use(async (socket, next) => {
@@ -270,6 +272,11 @@ app.use('/api/semantic', semanticRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api', require('./routes/test.route'));
 app.use('/api/mail', require('./routes/mailRoutes'));
+app.use('/api/automation', require('./routes/automationRoutes'));
+app.use('/api/documents', require('./routes/documentRoutes'));
+app.use('/api/omnichannel', require('./routes/omnichannelRoutes'));
+app.use('/api/campaigns', require('./routes/campaignRoutes'));
+
 
 // Transitioned: Analytics and Digest scheduling moved to BullMQ Scheduler in initRepeatableJobs.js
 

@@ -633,6 +633,7 @@ async function syncAllAccountsInternal(userId, maxResults = 35, options = {}) {
       userId,
       provider: 'google',
       syncEnabled: true,
+      requiresReconnect: false,
       OR: [
         { accessToken: { not: null } },
         { refreshToken: { not: null } },

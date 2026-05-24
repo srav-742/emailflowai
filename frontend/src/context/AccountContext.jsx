@@ -6,11 +6,13 @@ import { useAuth } from './AuthContext';
 const AccountContext = createContext(null);
 
 function decorateAccount(account) {
-  const reconnectRequired = (
-    account?.provider === 'google' &&
-    account?.syncEnabled === false &&
-    account?.connectionType === 'oauth' &&
-    !account?.hasOAuthTokens
+  const reconnectRequired = Boolean(
+    account?.requiresReconnect ||
+    (
+      account?.provider === 'google' &&
+      account?.connectionType === 'oauth' &&
+      !account?.hasOAuthTokens
+    )
   );
 
   return {

@@ -1,0 +1,428 @@
+/**
+ * Luxury Dark Aesthetics for Natural Language Automation OS (Stage 4)
+ */
+
+:root {
+  --automation-bg: #07070a;
+  --automation-panel: #111116;
+  --automation-border: rgba(255, 255, 255, 0.08);
+  --automation-border-hover: rgba(255, 255, 255, 0.16);
+  --automation-accent: #8b5cf6;
+  --automation-accent-glow: rgba(139, 92, 246, 0.15);
+  --automation-success: #10b981;
+  --automation-success-glow: rgba(16, 185, 129, 0.12);
+  --automation-warn: #f59e0b;
+  --automation-error: #ef4444;
+  --automation-text-primary: #f3f4f6;
+  --automation-text-secondary: #9ca3af;
+  --automation-text-muted: #6b7280;
+  --automation-gradient: linear-gradient(135deg, #8b5cf6, #3b82f6);
+}
+
+.automation-workspace {
+  background: var(--automation-bg);
+  color: var(--automation-text-primary);
+  min-height: 85vh;
+  padding: 1.5rem;
+  font-family: 'Outfit', 'Inter', sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.automation-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: linear-gradient(to right, rgba(139, 92, 246, 0.05), rgba(59, 130, 246, 0.05));
+  padding: 2rem;
+  border-radius: 16px;
+  border: 1px solid var(--automation-border);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+}
+
+.automation-hero h1 {
+  font-size: 2.2rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(to right, #ffffff, #c084fc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.automation-hero p {
+  color: var(--automation-text-secondary);
+  font-size: 1rem;
+  margin: 0;
+}
+
+.automation-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 2rem;
+}
+
+@media (max-width: 1024px) {
+  .automation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Glassmorphism Panel card styling */
+.automation-card {
+  background: var(--automation-panel);
+  border: 1px solid var(--automation-border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.automation-card:hover {
+  border-color: var(--automation-border-hover);
+  box-shadow: 0 12px 40px rgba(139, 92, 246, 0.08);
+}
+
+.automation-card-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 0.75rem;
+}
+
+/* Prompt Console styles */
+.prompt-console {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.prompt-textarea-wrapper {
+  position: relative;
+  border-radius: 12px;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.3s;
+}
+
+.prompt-textarea-wrapper:focus-within {
+  background: var(--automation-gradient);
+}
+
+.prompt-textarea {
+  width: 100%;
+  min-height: 100px;
+  background: #09090d;
+  color: var(--automation-text-primary);
+  border: none;
+  outline: none;
+  resize: vertical;
+  padding: 1rem;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+.prompt-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.suggestion-badge {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--automation-border);
+  color: var(--automation-text-secondary);
+  padding: 0.4rem 0.8rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.suggestion-badge:hover {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: var(--automation-accent);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+/* Compiling / Loading State */
+.shimmer-pulse {
+  background: linear-gradient(90deg, #111116 25%, #181822 50%, #111116 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Visual rule pipeline builder */
+.pipeline-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  position: relative;
+}
+
+.pipeline-node {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--automation-border);
+  border-radius: 12px;
+  padding: 1rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  transition: all 0.3s;
+}
+
+.pipeline-node.trigger {
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.02);
+}
+
+.pipeline-node.condition {
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.02);
+}
+
+.pipeline-node.action {
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.02);
+}
+
+.node-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.node-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.trigger .node-badge { background: #8b5cf6; color: #fff; }
+.condition .node-badge { background: #3b82f6; color: #fff; }
+.action .node-badge { background: #10b981; color: #fff; }
+
+.node-connector {
+  width: 2px;
+  height: 20px;
+  background: linear-gradient(to bottom, var(--automation-accent), var(--automation-border));
+  margin: 0 auto;
+}
+
+/* Simulation logs */
+.simulation-log-box {
+  background: #09090d;
+  border: 1px solid var(--automation-border);
+  border-radius: 12px;
+  padding: 1rem;
+  max-height: 250px;
+  overflow-y: auto;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.simulation-log-row {
+  display: flex;
+  gap: 0.75rem;
+  line-height: 1.4;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.simulation-log-row.success { color: var(--automation-success); }
+.simulation-log-row.warning { color: var(--automation-warn); }
+.simulation-log-row.error { color: var(--automation-error); }
+
+/* Runs & Workflow History list */
+.workflow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.workflow-item {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--automation-border);
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.workflow-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  transform: translateX(4px);
+}
+
+.workflow-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.workflow-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+.workflow-desc {
+  font-size: 0.8rem;
+  color: var(--automation-text-secondary);
+  margin: 0;
+}
+
+.workflow-actions-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+/* Interactive Switch toggle control */
+.switch-control {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+}
+
+.switch-control input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.1);
+  transition: .3s;
+  border-radius: 34px;
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .switch-slider {
+  background-color: var(--automation-success);
+}
+
+input:checked + .switch-slider:before {
+  transform: translateX(22px);
+}
+
+/* Buttons and status labels */
+.automation-btn {
+  background: var(--automation-gradient);
+  border: none;
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.automation-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+}
+
+.automation-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.automation-btn-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--automation-border);
+  color: var(--automation-text-primary);
+  box-shadow: none;
+}
+
+.automation-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.automation-btn-danger {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  box-shadow: none;
+}
+
+.automation-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+  box-shadow: none;
+}
+
+.run-badge {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.run-badge.completed { background: rgba(16, 185, 129, 0.15); color: var(--automation-success); }
+.run-badge.failed { background: rgba(239, 68, 68, 0.15); color: var(--automation-error); }
+.run-badge.running { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+
+.run-logs-panel {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: var(--automation-text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  margin-top: 0.5rem;
+}

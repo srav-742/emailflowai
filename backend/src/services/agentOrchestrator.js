@@ -170,6 +170,12 @@ async function updateWorkflowStatus(userId, workflowId, status) {
 }
 
 async function scanEmailForAgentActions(email) {
+  // Fire off Stage 4 Natural Language Automation rule evaluation in the background
+  const AutomationEngine = require('./stage4_automationEngine');
+  AutomationEngine.evaluateEmailReceived(email).catch(err => {
+    console.error('[Automation] Real-time rule evaluation failed:', err.message);
+  });
+
   return detectWorkflow(email);
 }
 

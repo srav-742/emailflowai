@@ -15,7 +15,12 @@ import MemoryGraphPage from './pages/MemoryGraphPage';
 import AgentWorkflowsPage from './pages/AgentWorkflowsPage';
 import DigestSettings from './pages/Settings/DigestSettings';
 import AccountSettings from './pages/Settings/AccountSettings';
+import AutomationPage from './pages/AutomationPage';
+import DocumentIntelligencePage from './pages/DocumentIntelligencePage';
+import OmnichannelPage from './pages/OmnichannelPage';
+import CampaignsPage from './pages/CampaignsPage';
 import './index.css';
+
 
 const LoadingScreen = ({ message = 'Loading EmailFlow AI...' }) => (
   <div className="app-loading-shell">
@@ -100,6 +105,11 @@ function App() {
           <Route path="search" element={<ErrorBoundary name="SemanticSearch"><SemanticSearchPage /></ErrorBoundary>} />
           <Route path="memory" element={<ErrorBoundary name="MemoryGraph"><MemoryGraphPage /></ErrorBoundary>} />
           <Route path="workflows" element={<ErrorBoundary name="AgentWorkflows"><AgentWorkflowsPage /></ErrorBoundary>} />
+          <Route path="automation" element={<ErrorBoundary name="Automation"><AutomationPage /></ErrorBoundary>} />
+          <Route path="documents" element={<ErrorBoundary name="DocumentIntelligence"><DocumentIntelligencePage /></ErrorBoundary>} />
+          <Route path="omnichannel" element={<ErrorBoundary name="Omnichannel"><OmnichannelPage /></ErrorBoundary>} />
+          <Route path="campaigns" element={<ErrorBoundary name="Campaigns"><CampaignsPage /></ErrorBoundary>} />
+
           <Route path="settings/digest" element={<ErrorBoundary name="DigestSettings"><DigestSettings /></ErrorBoundary>} />
           <Route path="settings/accounts" element={<ErrorBoundary name="AccountSettings"><AccountSettings /></ErrorBoundary>} />
           <Route path="pricing" element={<ErrorBoundary name="Pricing"><PricingPage /></ErrorBoundary>} />

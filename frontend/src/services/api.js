@@ -45,10 +45,11 @@ export const authAPI = {
   getGmailAuthUrl: () => api.get('/auth/gmail/url'),
   connectGmail: (tokens) => api.post('/auth/gmail/connect', { tokens }),
   getProfile: () => api.get('/auth/profile'),
-  logout: () => api.post('/auth/logout'),
-  registerAndSendOtp: ({ name, email, password }) => api.post('/auth/register-otp', { name, email, password }),
+  logout: (refreshToken) => api.post('/auth/logout', { refreshToken }),
+  registerAndSendOtp: ({ name, email, password, type }) => api.post('/auth/register-otp', { name, email, password, type }),
   verifyOtp: ({ email, otp }) => api.post('/auth/verify-otp', { email, otp }),
-  resendOtp: ({ email }) => api.post('/auth/resend-otp', { email }),
+  resendOtp: ({ email, type }) => api.post('/auth/resend-otp', { email, type }),
+  refresh: (refreshToken) => api.post('/auth/refresh', { refreshToken }),
 };
 
 
@@ -151,4 +152,42 @@ export const stage3API = {
   verify: () => api.get('/ai/stage3/verify'),
 };
 
+export const automationAPI = {
+  list: () => api.get('/automation/list'),
+  create: (prompt) => api.post('/automation/create', { prompt }),
+  test: (workflowJson) => api.post('/automation/test', { workflowJson }),
+  toggle: (id, enabled) => api.post('/automation/toggle', { id, enabled }),
+  delete: (id) => api.delete(`/automation/${id}`),
+  runs: () => api.get('/automation/runs'),
+};
+
+export const documentAPI = {
+  upload: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/documents/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+  list: () => api.get('/documents'),
+  get: (id) => api.get(`/documents/${id}`),
+  search: (q) => api.get('/documents/search', { params: { q } }),
+  delete: (id) => api.delete(`/documents/${id}`),
+};
+
+export const campaignAPI = {
+  list: () => api.get('/campaigns/list'),
+  create: (data) => api.post('/campaigns/create', data),
+  start: (campaignId) => api.post('/campaigns/start', { campaignId }),
+  pause: (campaignId) => api.post('/campaigns/pause', { campaignId }),
+  test: (data) => api.post('/campaigns/test', data),
+  generateAI: (prompt) => api.post('/campaigns/generate-ai', { prompt }),
+  getContacts: (campaignId) => api.get(`/campaigns/${campaignId}/contacts`),
+  importContacts: (campaignId, contacts) => api.post(`/campaigns/${campaignId}/contacts/import`, { contacts }),
+  getAnalytics: () => api.get('/campaigns/analytics'),
+};
+
 export default api;
+

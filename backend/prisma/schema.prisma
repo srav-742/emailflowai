@@ -49,6 +49,11 @@ model User {
   subscription      Subscription?
   threads           Thread[]
   stats             UserStats?
+  emailVerified     Boolean                @default(false) @map("email_verified")
+  authSessions      AuthSession[]
+  billingCustomer   BillingCustomer?
+  invoices          Invoice[]
+  usageMetrics      UsageMetric[]
 
   @@map("users")
 }
@@ -544,4 +549,75 @@ model AgentWorkflowApproval {
 
   @@index([userId, status])
   @@map("agent_workflow_approvals")
+}
+
+model AuthSession {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  refreshToken String   @unique @map("refresh_token")
+  ipAddress    String?  @map("ip_address")
+  deviceInfo   Json?    @map("device_info")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("auth_sessions")
+}
+
+model AuthLog {
+  id        String   @id @default(uuid())
+  email     String
+  action    String
+  ipAddress String?  @map("ip_address")
+  success   Boolean
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("auth_logs")
+}
+
+model BillingCustomer {
+  id               String   @id @default(uuid())
+  userId           String   @unique @map("user_id")
+  stripeCustomerId String   @unique @map("stripe_customer_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("billing_customers")
+}
+
+model Invoice {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  stripeInvoiceId String   @map("stripe_invoice_id")
+  amount          Int
+  currency        String
+  status          String
+  invoicePdf      String?  @map("invoice_pdf")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("invoices")
+}
+
+model UsageMetric {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  metricType         String   @map("metric_type")
+  usageCount         BigInt   @default(0) @map("usage_count")
+  billingPeriodStart DateTime @map("billing_period_start")
+  billingPeriodEnd   DateTime @map("billing_period_end")
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("usage_metrics")
+}
+
+model ProcessedWebhook {
+  id            String   @id @default(uuid())
+  stripeEventId String   @unique @map("stripe_event_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("processed_webhooks")
 }

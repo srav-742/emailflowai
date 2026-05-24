@@ -8,7 +8,7 @@ const {
   outlookAuth,
   outlookCallback,
 } = require('../controllers/authController');
-const { getGmailAuthUrl, getGmailTokens, getGmailOAuthConfig } = require('../utils/gmailOAuth');
+const { getGmailAuthUrl, getGmailTokens, getGmailOAuthConfig, getUserIdFromOAuthState } = require('../utils/gmailOAuth');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -36,8 +36,9 @@ async function handleGmailCallback(req, res) {
       return res.redirect(`${frontendUrl}/auth/gmail-callback?error=missing_gmail_callback_data`);
     }
 
+    const userId = getUserIdFromOAuthState(String(state));
     const tokens = await getGmailTokens(code);
-    await persistGmailTokens(String(state), tokens);
+    await persistGmailTokens(userId, tokens);
 
     return res.redirect(`${frontendUrl}/auth/gmail-callback?status=success`);
   } catch (error) {
@@ -48,11 +49,22 @@ async function handleGmailCallback(req, res) {
 
 router.post('/firebase-login', asyncHandler(firebaseGoogleLogin));
 
-// OTP-based email authentication
-const { registerAndSendOtp, verifyOtpHandler, resendOtp } = require('../controllers/otpAuthController');
-router.post('/register-otp', asyncHandler(registerAndSendOtp));
-router.post('/verify-otp', asyncHandler(verifyOtpHandler));
-router.post('/resend-otp', asyncHandler(resendOtp));
+// OTP-based email authentication & session management
+const { 
+  registerAndSendOtp, 
+  verifyOtpHandler, 
+  resendOtp, 
+  refreshSession, 
+  logout: otpLogout 
+} = require('../controllers/otpAuthController');
+
+const { requestOtpLimiter, verifyOtpLimiter, ipAuthLimiter } = require('../middleware/otpRateLimit');
+
+router.post('/register-otp', ipAuthLimiter, requestOtpLimiter, asyncHandler(registerAndSendOtp));
+router.post('/request-otp', ipAuthLimiter, requestOtpLimiter, asyncHandler(registerAndSendOtp));
+router.post('/verify-otp', ipAuthLimiter, verifyOtpLimiter, asyncHandler(verifyOtpHandler));
+router.post('/resend-otp', ipAuthLimiter, requestOtpLimiter, asyncHandler(resendOtp));
+router.post('/refresh', ipAuthLimiter, asyncHandler(refreshSession));
 
 router.get('/gmail/url', authenticate, (req, res) => {
   res.json(buildGmailAuthPayload(req.user.id));
@@ -62,12 +74,20 @@ router.get('/google/url', authenticate, (req, res) => {
   res.json(buildGmailAuthPayload(req.user.id));
 });
 
+router.get('/gmail/connect', authenticate, (req, res) => {
+  res.redirect(getGmailAuthUrl(req.user.id));
+});
+
+router.get('/google/connect', authenticate, (req, res) => {
+  res.redirect(getGmailAuthUrl(req.user.id));
+});
+
 router.get('/gmail/callback', asyncHandler(handleGmailCallback));
 router.get('/google/callback', asyncHandler(handleGmailCallback));
 
 router.post('/gmail/connect', authenticate, asyncHandler(saveGmailTokens));
 router.get('/profile', authenticate, asyncHandler(getProfile));
-router.post('/logout', authenticate, asyncHandler(logout));
+router.post('/logout', asyncHandler(otpLogout));
 
 // Outlook Integration
 router.get('/outlook', asyncHandler(outlookAuth));

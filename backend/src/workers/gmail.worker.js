@@ -37,16 +37,22 @@ const gmailWorker = new Worker(
 
         case 'refresh-token': {
           console.log(`[Gmail Worker] Refreshing token for user: ${userId}, account: ${accountId || 'primary'}`);
-          const { getValidAccessToken } = require('../services/tokenService');
-          const token = await getValidAccessToken(userId, accountId);
-          return { success: true, type: 'refresh-token', userId, hasToken: !!token };
+          if (accountId) {
+            const { refreshGoogleAccountToken } = require('../services/tokenRefreshService');
+            const result = await refreshGoogleAccountToken(userId, accountId);
+            return { success: true, type: 'refresh-token', userId, accountId, ...result };
+          }
+
+          const { refreshExpiringGoogleTokens } = require('../services/tokenRefreshService');
+          const results = await refreshExpiringGoogleTokens();
+          return { success: true, type: 'refresh-token', userId, refreshedCount: results.filter((item) => item.refreshed).length };
         }
 
         case 'sync-calendar': {
           console.log(`[Gmail Worker] Syncing calendar for user: ${userId}`);
           const { syncCalendar } = require('../services/calendarService');
-          await syncCalendar(userId);
-          return { success: true, type: 'sync-calendar', userId };
+          await syncCalendar(userId, accountId);
+          return { success: true, type: 'sync-calendar', userId, accountId };
         }
 
         case 'periodic-sync': {
@@ -87,6 +93,7 @@ const gmailWorker = new Worker(
                 userId: user.id,
                 provider: 'google',
                 syncEnabled: true,
+                requiresReconnect: false,
               },
               select: { id: true, email: true }
             });
@@ -95,6 +102,16 @@ const gmailWorker = new Worker(
               for (const account of accounts) {
                 await gmailQueue.add('sync-inbox', {
                   type: 'sync-inbox',
+                  userId: user.id,
+                  accountId: account.id,
+                });
+                await gmailQueue.add('sync-calendar', {
+                  type: 'sync-calendar',
+                  userId: user.id,
+                  accountId: account.id,
+                });
+                await gmailQueue.add('refresh-token', {
+                  type: 'refresh-token',
                   userId: user.id,
                   accountId: account.id,
                 });
@@ -121,7 +138,12 @@ const gmailWorker = new Worker(
       console.error(`❌ [Gmail Worker] Error processing job ${job.id}:`, error.message);
 
       // --- Handle Invalid Grant (Token Revoked/Expired) ---
-      if (error.message?.includes('invalid_grant') || error.message?.includes('refresh_token')) {
+      if (
+        error.message?.includes('invalid_grant') ||
+        error.message?.includes('unauthorized_client') ||
+        error.message?.includes('refresh_token') ||
+        error.message?.toLowerCase?.().includes('reconnect')
+      ) {
         console.warn(`⚠️ [Gmail Worker] OAuth Revoked for User: ${userId}. Marking for reconnect.`);
         try {
           if (accountId) {

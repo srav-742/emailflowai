@@ -1,4 +1,59 @@
 const { google } = require('googleapis');
+const crypto = require('crypto');
+
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+function getStateSecret() {
+  return process.env.JWT_SECRET || process.env.SESSION_SECRET || process.env.GOOGLE_CLIENT_SECRET || 'emailflow-oauth-state-dev-secret';
+}
+
+function base64UrlEncode(value) {
+  return Buffer.from(value).toString('base64url');
+}
+
+function base64UrlDecode(value) {
+  return Buffer.from(value, 'base64url').toString('utf8');
+}
+
+function signStatePayload(encodedPayload) {
+  return crypto.createHmac('sha256', getStateSecret()).update(encodedPayload).digest('base64url');
+}
+
+function createOAuthState(userId) {
+  const payload = base64UrlEncode(JSON.stringify({
+    userId,
+    nonce: crypto.randomBytes(16).toString('hex'),
+    exp: Date.now() + OAUTH_STATE_TTL_MS,
+  }));
+  return `${payload}.${signStatePayload(payload)}`;
+}
+
+function getUserIdFromOAuthState(state) {
+  if (!state) return null;
+
+  if (!state.includes('.')) {
+    throw new Error('OAuth state must be signed.');
+  }
+
+  const [encodedPayload, signature] = String(state).split('.');
+  const expectedSignature = signStatePayload(encodedPayload);
+  const signatureBuffer = Buffer.from(signature || '');
+  const expectedBuffer = Buffer.from(expectedSignature);
+
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    throw new Error('Invalid OAuth state signature.');
+  }
+
+  const payload = JSON.parse(base64UrlDecode(encodedPayload));
+  if (!payload.userId || !payload.exp || Date.now() > payload.exp) {
+    throw new Error('OAuth state expired or invalid.');
+  }
+
+  return payload.userId;
+}
 
 function getConfiguredRedirectUri() {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
@@ -40,6 +95,7 @@ function createOAuth2Client() {
 
 function getGmailAuthUrl(state) {
   const oauth2Client = createOAuth2Client();
+  const oauthState = createOAuthState(state);
   const scopes = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.modify',
@@ -54,7 +110,7 @@ function getGmailAuthUrl(state) {
     access_type: 'offline',
     scope: scopes,
     prompt: 'select_account consent',
-    state: state || '',
+    state: oauthState,
   });
 }
 
@@ -83,4 +139,14 @@ async function getUserInfo(tokens) {
   return response.data;
 }
 
-module.exports = { getGmailAuthUrl, getGmailTokens, getGmailClient, getUserInfo, getConfiguredRedirectUri, getConfiguredFrontendUrl, getGmailOAuthConfig };
+module.exports = {
+  createOAuthState,
+  getUserIdFromOAuthState,
+  getGmailAuthUrl,
+  getGmailTokens,
+  getGmailClient,
+  getUserInfo,
+  getConfiguredRedirectUri,
+  getConfiguredFrontendUrl,
+  getGmailOAuthConfig,
+};

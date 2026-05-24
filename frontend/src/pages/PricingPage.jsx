@@ -2,114 +2,197 @@ import React, { useState } from 'react';
 import { billingAPI } from '../services/api';
 import './PricingPage.css';
 
-const PLANS = [
-  {
-    id: 'free',
-    name: 'Free',
-    price: '$0',
-    description: 'Perfect for getting started with AI email management.',
-    features: [
-      'Smart Inbox Tabs',
-      'Basic AI Summaries',
-      '10 AI Actions/day',
-      'Community Support'
-    ],
-    buttonText: 'Current Plan',
-    disabled: true,
-  },
-  {
-    id: 'pro_monthly',
-    name: 'Pro Monthly',
-    price: '$12',
-    period: '/month',
-    description: 'Unlock full power with unlimited AI and deep briefings.',
-    features: [
-      'Everything in Free',
-      'Unlimited AI Actions',
-      'Deep AI Briefings',
-      'Priority Support',
-      'Early Access to Features'
-    ],
-    buttonText: 'Upgrade to Pro',
-    priceId: import.meta.env.VITE_STRIPE_PRO_MONTHLY_PRICE_ID,
-    recommended: true,
-  },
-  {
-    id: 'pro_annual',
-    name: 'Pro Annual',
-    price: '$99',
-    period: '/year',
-    description: 'Save 30% with yearly billing. The choice of professionals.',
-    features: [
-      'Everything in Pro Monthly',
-      '2 Months Free',
-      'VIP Support Channel',
-      'Custom Style Profiles'
-    ],
-    buttonText: 'Get Annual Pro',
-    priceId: import.meta.env.VITE_STRIPE_PRO_ANNUAL_PRICE_ID,
-  }
-];
-
 const PricingPage = () => {
+  const [billingCycle, setBillingCycle] = useState('monthly'); // 'monthly' or 'yearly'
   const [loading, setLoading] = useState(null);
 
-  const handleSubscribe = async (priceId, planId) => {
-    if (!priceId) return;
+  const handleSubscribe = async (planKey) => {
     try {
-      setLoading(planId);
-      const response = await billingAPI.createCheckout(priceId);
+      setLoading(planKey);
+      
+      // Send the appropriate plan slug to the backend create-checkout-session endpoint
+      const planSlug = billingCycle === 'monthly' ? planKey : `${planKey}-annual`;
+      const response = await billingAPI.createCheckout(planSlug);
+      
       if (response.data?.url) {
         window.location.href = response.data.url;
       }
     } catch (error) {
       console.error('Checkout error:', error);
-      alert('Failed to start checkout. Please try again.');
+      alert('Failed to start checkout session. Please try again.');
     } finally {
       setLoading(null);
     }
   };
 
+  const plans = [
+    {
+      id: 'free',
+      name: 'Free',
+      price: { monthly: 0, yearly: 0 },
+      description: 'Ideal for individuals starting out with AI email management.',
+      features: [
+        { label: '1 Connected Email Account', included: true },
+        { label: '50 AI Summaries per month', included: true },
+        { label: '100MB Attachment Storage', included: true },
+        { label: 'Rule-based categorization', included: true },
+        { label: 'Automation & workflows', included: false },
+        { label: 'Team collaboration seats', included: false }
+      ],
+      buttonText: 'Current Plan',
+      action: null,
+      disabled: true,
+      popular: false
+    },
+    {
+      id: 'pro',
+      name: 'Pro',
+      price: { monthly: 12, yearly: 8.25 }, // equivalent of $99/year
+      billingText: { monthly: 'billed monthly', yearly: 'billed $99/year (Save 30%)' },
+      description: 'Unlock high-volume AI workflows, deep brief generation, and intelligence.',
+      features: [
+        { label: '10 Connected Email Accounts', included: true },
+        { label: 'Unlimited AI Summaries', included: true },
+        { label: '5GB Secure Attachment Storage', included: true },
+        { label: 'AI draft campaigns & replies', included: true },
+        { label: 'Full automation & rules engine', included: true },
+        { label: 'Priority Support channel', included: true }
+      ],
+      buttonText: 'Upgrade to Pro',
+      action: 'pro',
+      disabled: false,
+      popular: true
+    },
+    {
+      id: 'team',
+      name: 'Team',
+      price: { monthly: 49, yearly: 33.25 }, // equivalent of $399/year
+      billingText: { monthly: 'billed monthly', yearly: 'billed $399/year (Save 20%)' },
+      description: 'Scale intelligence across your organization with collaborative tools.',
+      features: [
+        { label: '100 Connected Email Accounts', included: true },
+        { label: 'Unlimited AI summaries & briefs', included: true },
+        { label: '50GB Shared attachment storage', included: true },
+        { label: 'Includes 10 team seats', included: true },
+        { label: 'Shared automations & workflows', included: true },
+        { label: 'VIP Priority Slack & ticketing', included: true }
+      ],
+      buttonText: 'Get Team Plan',
+      action: 'team',
+      disabled: false,
+      popular: false
+    },
+    {
+      id: 'enterprise',
+      name: 'Enterprise',
+      price: { monthly: 299, yearly: 249 },
+      billingText: { monthly: 'billed monthly', yearly: 'billed $2990/year (Save 17%)' },
+      description: 'Custom security, training profiles, and dedicated resources.',
+      features: [
+        { label: 'Unlimited Email Accounts', included: true },
+        { label: 'Unlimited AI actions & summaries', included: true },
+        { label: 'Unlimited secure storage', included: true },
+        { label: 'SSO/SAML login integration', included: true },
+        { label: 'Custom fine-tuned AI model', included: true },
+        { label: 'Dedicated Account Manager & SLA', included: true }
+      ],
+      buttonText: 'Contact Enterprise',
+      action: 'enterprise',
+      disabled: false,
+      popular: false
+    }
+  ];
+
   return (
-    <div className="pricing-container">
-      <div className="pricing-header">
-        <span className="eyebrow">Flexible Plans</span>
-        <h1>Elevate your inbox intelligence</h1>
-        <p>Choose the plan that fits your professional workflow.</p>
+    <div className="pricing-page-shell">
+      <div className="pricing-page-hero">
+        <span className="pricing-eyebrow">MONETIZATION FOUNDATION</span>
+        <h1 className="pricing-title">Flexible Pricing, Built for Scale</h1>
+        <p className="pricing-subtitle">
+          Supercharge your inbox with state-of-the-art AI analysis, secure team collaboration, and seamless search.
+        </p>
+
+        {/* Toggle Switch */}
+        <div className="billing-cycle-toggle-wrapper">
+          <button
+            className={`cycle-toggle-btn ${billingCycle === 'monthly' ? 'active' : ''}`}
+            onClick={() => setBillingCycle('monthly')}
+          >
+            Monthly
+          </button>
+          <button
+            className={`cycle-toggle-btn ${billingCycle === 'yearly' ? 'active' : ''}`}
+            onClick={() => setBillingCycle('yearly')}
+          >
+            Yearly <span className="discount-pill">Save up to 30%</span>
+          </button>
+        </div>
       </div>
 
-      <div className="pricing-grid">
-        {PLANS.map((plan) => (
-          <div key={plan.id} className={`pricing-card ${plan.recommended ? 'recommended' : ''}`}>
-            {plan.recommended && <div className="recommended-badge">Most Popular</div>}
-            <div className="plan-name">{plan.name}</div>
-            <div className="plan-price">
-              <span className="amount">{plan.price}</span>
-              {plan.period && <span className="period">{plan.period}</span>}
+      <div className="pricing-cards-grid">
+        {plans.map((plan) => {
+          const isCurrentLoading = loading === plan.id;
+          const displayPrice = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
+          const detailText = plan.billingText ? (billingCycle === 'monthly' ? plan.billingText.monthly : plan.billingText.yearly) : 'free forever';
+
+          return (
+            <div key={plan.id} className={`pricing-card-glass ${plan.popular ? 'popular-card' : ''}`}>
+              {plan.popular && <div className="popular-ribbon">Most Popular</div>}
+              
+              <div className="pricing-card-header">
+                <h3 className="plan-name-badge">{plan.name}</h3>
+                <p className="plan-description-text">{plan.description}</p>
+                <div className="plan-pricing-holder">
+                  <span className="currency-symbol">$</span>
+                  <span className="price-value">{displayPrice}</span>
+                  <span className="price-period">/mo</span>
+                </div>
+                <span className="price-details-tag">{detailText}</span>
+              </div>
+
+              <div className="pricing-card-action">
+                {plan.action ? (
+                  <button
+                    className={`upgrade-action-btn ${plan.popular ? 'btn-glow-primary' : 'btn-glow-secondary'}`}
+                    disabled={isCurrentLoading}
+                    onClick={() => handleSubscribe(plan.action)}
+                  >
+                    {isCurrentLoading ? (
+                      <span className="btn-loading-flex">
+                        <span className="micro-spinner"></span> Securely Redirecting...
+                      </span>
+                    ) : (
+                      plan.buttonText
+                    )}
+                  </button>
+                ) : (
+                  <button className="upgrade-action-btn btn-disabled" disabled={true}>
+                    {plan.buttonText}
+                  </button>
+                )}
+              </div>
+
+              <div className="pricing-card-features">
+                <h4 className="features-section-title">Included Features:</h4>
+                <ul className="features-bullet-list">
+                  {plan.features.map((feature, idx) => (
+                    <li key={idx} className={`feature-bullet-item ${feature.included ? 'included' : 'excluded'}`}>
+                      <span className="bullet-icon">{feature.included ? '✓' : '✕'}</span>
+                      <span className="bullet-label">{feature.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
-            <p className="plan-description">{plan.description}</p>
-            
-            <button 
-              className={`button ${plan.recommended ? 'button-primary' : 'button-secondary'}`}
-              disabled={plan.disabled || loading === plan.id}
-              onClick={() => handleSubscribe(plan.priceId, plan.id)}
-            >
-              {loading === plan.id ? 'Redirecting...' : plan.buttonText}
-            </button>
-
-            <ul className="plan-features">
-              {plan.features.map((feature, i) => (
-                <li key={i}>
-                  <span className="check">✓</span> {feature}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <div className="pricing-footer">
-        <p>Secure payments processed by Stripe. Cancel anytime.</p>
+      <div className="pricing-page-security-footer">
+        <div className="security-icon-shield">🛡</div>
+        <p className="security-text">
+          PCI-Compliant 256-bit encryption checkout is powered directly by Stripe. Active subscriptions can be canceled or updated anytime via self-service.
+        </p>
       </div>
     </div>
   );

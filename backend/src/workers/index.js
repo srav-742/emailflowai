@@ -20,6 +20,7 @@ const { mailSyncWorker } = require('./mail-sync.worker');
 const { analyticsWorker } = require('./analytics.worker');
 const { notificationWorker } = require('./notification.worker');
 const { schedulerWorker } = require('./scheduler.worker');
+const { otpMailWorker } = require('./otpMail.worker');
 
 console.log('================================================');
 console.log('✅ [Workers] All workers started successfully:');
@@ -29,6 +30,7 @@ console.log(`  📬 Mail Sync Worker  (mail-sync)             — status: active
 console.log(`  📊 Analytics Worker  (analytics-processing)  — status: active | concurrency: 2`);
 console.log(`  🔔 Notification Worker (notification-delivery) — status: active | concurrency: 10`);
 console.log(`  ⏰ Scheduler Worker  (scheduler)             — status: active | concurrency: 2`);
+console.log(`  ✉️  OTP Mail Worker  (otp-mail-delivery)     — status: active | concurrency: 5`);
 console.log('================================================');
 console.log('📈 [Monitoring] Bull Board: http://localhost:10000/admin/queues');
 
@@ -43,6 +45,7 @@ async function gracefulShutdown(signal) {
     analyticsWorker.close(),
     notificationWorker.close(),
     schedulerWorker.close(),
+    otpMailWorker.close(),
   ]);
 
   console.log('✅ [Workers] All workers shut down.');

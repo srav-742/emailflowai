@@ -5,9 +5,9 @@ const { createReconnectError, resolveGoogleAccountEmail } = require('./googleCon
 /**
  * Sync Google Calendar events for the next 7 days.
  */
-async function syncCalendar(userId) {
+async function syncCalendar(userId, accountId = null) {
   try {
-    const email = await resolveGoogleAccountEmail(userId);
+    const email = await resolveGoogleAccountEmail(userId, accountId);
     if (!email) throw createReconnectError('No connected Gmail account found. Please reconnect Gmail.');
 
     const calendar = await getCalendarClient(userId, email);
@@ -16,7 +16,7 @@ async function syncCalendar(userId) {
     const timeMin = new Date().toISOString();
     const timeMax = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    console.log(`[CalendarService] Fetching events for user ${userId}...`);
+    console.log(`[CalendarService] Fetching events for user ${userId}${accountId ? `, account ${accountId}` : ''}...`);
     const response = await calendar.events.list({
       calendarId: 'primary',
       timeMin,

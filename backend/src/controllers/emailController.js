@@ -55,6 +55,11 @@ function normalizeStoredPriority(value) {
 async function logAIUsage(userId, options = {}) {
   try {
     await trackAIAction(userId, options);
+    const usageService = require('../services/usageService');
+    const aiActionsCount = options.aiActions || 1;
+    await usageService.trackUsage(userId, 'ai_summaries', aiActionsCount).catch(err => {
+      console.error('Stripe SaaS Billing usage tracking warning:', err.message);
+    });
   } catch (error) {
     console.error('Analytics tracking error:', error.message || error);
   }

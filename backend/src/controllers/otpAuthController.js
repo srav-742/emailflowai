@@ -1,220 +1,216 @@
-const crypto = require('crypto');
+/**
+ * otpAuthController.js — Production-Grade OTP Authentication Controller
+ *
+ * Implements:
+ *   - Secure Email + OTP SignUp & Login Pipeline
+ *   - Advanced email validation (MX record check & disposable email blocking)
+ *   - Rate limiting & cooldown management
+ *   - Token generation & refresh token rotation (AuthSessions)
+ *   - Session audit logging (AuthLogs)
+ */
+
+const dns = require('dns').promises;
 const prisma = require('../config/database');
-const { generateToken } = require('../utils/jwt');
+const otpService = require('../services/otpService');
+const tokenService = require('../services/tokenService');
+const { otpMailQueue } = require('../queues/otpMail.queue');
 
-// ──────────────────────────────────────────────────────────
-// In-memory OTP store (production → use Redis / DB table)
-// ──────────────────────────────────────────────────────────
-const otpStore = new Map(); // key: email, value: { otp, expiresAt, name, password }
-
-function generateOTP() {
-  return crypto.randomInt(100000, 999999).toString();
-}
-
-function storeOTP(email, otp, extra = {}) {
-  otpStore.set(email.toLowerCase(), {
-    otp,
-    expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
-    ...extra,
-  });
-}
-
-function verifyStoredOTP(email, code) {
-  const entry = otpStore.get(email.toLowerCase());
-  if (!entry) return { valid: false, reason: 'No OTP found. Please request a new one.' };
-  if (Date.now() > entry.expiresAt) {
-    otpStore.delete(email.toLowerCase());
-    return { valid: false, reason: 'OTP has expired. Please request a new one.' };
-  }
-  if (entry.otp !== code) return { valid: false, reason: 'Invalid OTP code.' };
-  return { valid: true, entry };
-}
-
-// ──────────────────────────────────────────────────────────
-// Email sender (uses nodemailer if available, falls back to console log)
-// ──────────────────────────────────────────────────────────
-let transporter = null;
-
-function getTransporter() {
-  if (transporter) return transporter;
-
-  try {
-    const nodemailer = require('nodemailer');
-
-    if (process.env.SMTP_HOST) {
-      transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-        tls: {
-          rejectUnauthorized: false
-        }
-      });
-    } else if (process.env.GMAIL_APP_USER && process.env.GMAIL_APP_PASS) {
-      // Gmail app password shortcut
-      transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: process.env.GMAIL_APP_USER,
-          pass: process.env.GMAIL_APP_PASS,
-        },
-        tls: {
-          rejectUnauthorized: false
-        }
-      });
-    } else {
-      console.log('[OTP] No SMTP/Gmail config found. OTPs will be logged to console only.');
-      return null;
-    }
-
-    return transporter;
-  } catch {
-    console.log('[OTP] nodemailer not installed. OTPs will be logged to console.');
-    return null;
-  }
-}
-
-async function sendOTPEmail(email, otp, name) {
-  const mailer = getTransporter();
-  const fromAddress = process.env.SMTP_FROM || process.env.GMAIL_APP_USER || 'noreply@emailflow.ai';
-
-  if (mailer) {
-    try {
-      await mailer.sendMail({
-        from: `"EmailFlow AI" <${fromAddress}>`,
-        to: email,
-        subject: `Your EmailFlow AI verification code: ${otp}`,
-        html: `
-          <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 480px; margin: 0 auto; background: #0a0f23; color: #f0f2ff; border-radius: 16px; overflow: hidden; border: 1px solid rgba(99,102,241,0.2);">
-            <div style="padding: 32px 28px 20px; text-align: center;">
-              <div style="display: inline-block; width: 48px; height: 48px; border-radius: 12px; background: linear-gradient(135deg, #7c3aed, #06b6d4); color: #fff; font-weight: 800; font-size: 18px; line-height: 48px; margin-bottom: 16px;">EF</div>
-              <h2 style="margin: 0 0 8px; font-size: 22px; color: #f0f2ff;">Verify your email</h2>
-              <p style="margin: 0; font-size: 14px; color: #9298c0;">Hi ${name || 'there'}, use this code to complete your sign-up.</p>
-            </div>
-            <div style="padding: 12px 28px 24px; text-align: center;">
-              <div style="display: inline-block; letter-spacing: 0.5em; font-size: 36px; font-weight: 700; color: #a78bfa; background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.3); border-radius: 12px; padding: 16px 28px; margin: 8px 0 16px;">${otp}</div>
-              <p style="margin: 0; font-size: 13px; color: #6b7199;">This code expires in 10 minutes.</p>
-            </div>
-            <div style="padding: 16px 28px; font-size: 12px; color: #6b7199; border-top: 1px solid rgba(99,102,241,0.15); text-align: center;">
-              If you didn't request this code, please ignore this email.
-            </div>
-          </div>
-        `,
-        text: `Your EmailFlow AI verification code is: ${otp}\n\nThis code expires in 10 minutes.`,
-      });
-      console.log(`[OTP] Verification email sent to ${email}`);
-      return true;
-    } catch (mailErr) {
-      console.error('[OTP] Failed to send email:', mailErr.message);
-      // Fall through to console log
-    }
-  }
-
-  // Fallback: log to console (development mode)
-  console.log('═══════════════════════════════════════════');
-  console.log(`  📧 OTP for ${email}: ${otp}`);
-  console.log('═══════════════════════════════════════════');
-  return true;
-}
-
-// ──────────────────────────────────────────────────────────
-// Route handlers
-// ──────────────────────────────────────────────────────────
+// List of blacklisted disposable email domains
+const DISPOSABLE_DOMAINS = new Set([
+  'yopmail.com', 'mailinator.com', 'tempmail.com', '10minutemail.com',
+  'getairmail.com', 'guerrillamail.com', 'dispostable.com', 'sharklasers.com',
+  'generator.email', 'maildrop.cc', 'trashmail.com', 'mailnesia.com'
+]);
 
 /**
- * POST /api/auth/register-otp
- * Creates a pending registration and sends OTP to the email.
+ * Validate email syntax, disposable check, and active MX records.
+ */
+async function validateEmail(email) {
+  const normalized = email.toLowerCase().trim();
+  
+  // 1. Basic Syntax Check
+  const syntaxCheck = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+  if (!syntaxCheck) {
+    return { valid: false, reason: 'Invalid email syntax format.' };
+  }
+
+  const domain = normalized.split('@')[1];
+
+  // 2. Disposable Email Check
+  if (DISPOSABLE_DOMAINS.has(domain)) {
+    return { valid: false, reason: 'Disposable email addresses are not allowed.' };
+  }
+
+  // 3. DNS MX Record Verification
+  try {
+    const mxRecords = await dns.resolveMx(domain);
+    if (!mxRecords || mxRecords.length === 0) {
+      return { valid: false, reason: 'No active mail exchangers (MX) found for this domain.' };
+    }
+  } catch (dnsErr) {
+    // In local development we can proceed if DNS resolution fails due to internet issues
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`DNS check failed for domain ${domain}:`, dnsErr.message);
+      return { valid: false, reason: 'Could not verify active mail servers for this email domain.' };
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Log an authentication event to the database.
+ */
+async function logAuthEvent(email, action, success, req) {
+  try {
+    await prisma.authLog.create({
+      data: {
+        email: email.toLowerCase().trim(),
+        action,
+        success,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] || null
+      }
+    });
+  } catch (err) {
+    console.error('⚠️ [AuthLog] Failed to write audit log:', err.message);
+  }
+}
+
+/**
+ * POST /api/auth/register-otp (maps from legacy / legacy SignUp page helper)
+ * POST /api/auth/request-otp (Unified API)
+ * Generates an OTP, hashes it, saves it in Redis, and dispatches the SMTP job to BullMQ.
  */
 async function registerAndSendOtp(req, res) {
-  try {
-    const { name, email, password } = req.body;
+  const { name, email, password, type = 'login' } = req.body;
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || null;
+  const userAgent = req.headers['user-agent'] || 'Unknown Client';
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
+  try {
+    if (!email) {
+      return res.status(400).json({ error: 'Email address is required.' });
     }
-    if (password.length < 6) {
+
+    // 1. Thorough Validation Check
+    const emailCheck = await validateEmail(email);
+    if (!emailCheck.valid) {
+      await logAuthEvent(email, 'otp_request_failed_validation', false, req);
+      return res.status(400).json({ error: emailCheck.reason });
+    }
+
+    // 2. Cooldown check
+    const isCooled = await otpService.checkResendCooldown(email);
+    if (isCooled) {
+      return res.status(429).json({ error: 'Verification code resent too quickly. Please wait 60 seconds.' });
+    }
+
+    // Check if registering a new user with a password, enforce length
+    if (type === 'signup' && password && password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
-    // Check if user already exists but allow re-sending OTP
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    // 3. Generate Cryptographically Secure OTP
+    const otp = otpService.generateOTP();
 
-    const otp = generateOTP();
-    storeOTP(email, otp, { name, password });
+    // 4. Hash and store in Redis (5-min TTL)
+    await otpService.storeOTP(email, otp, type, { name, password });
 
-    await sendOTPEmail(email, otp, name);
+    // Set 60-second resend cooldown
+    await otpService.setResendCooldown(email);
 
-    const message = existingUser
-      ? 'Verification code sent to your email.'
-      : 'Account created! Check your email for the verification code.';
+    // 5. Dispatch async SMTP delivery job to BullMQ
+    await otpMailQueue.add('send-otp', {
+      email,
+      otp,
+      name,
+      type,
+      ipAddress: clientIp,
+      deviceInfo: userAgent
+    });
 
-    // Expose OTP in JSON during development so user is never blocked by SMTP delivery delays
-    res.json({ 
-      message, 
-      devOtp: process.env.NODE_ENV === 'development' ? otp : undefined 
+    // 6. Log session request
+    await logAuthEvent(email, `otp_request_${type}`, true, req);
+
+    console.log(`🚀 [Auth API] Queued OTP delivery job for ${email}`);
+
+    res.json({
+      message: 'Verification code successfully sent to your inbox.',
+      devOtp: process.env.NODE_ENV === 'development' ? otp : undefined
     });
   } catch (error) {
-    console.error('[RegisterOTP] Error:', error);
-    res.status(500).json({ error: 'Failed to process registration. Please try again.' });
+    console.error('[RequestOTP] Error:', error);
+    res.status(500).json({ error: 'Failed to request verification code. Please try again.' });
   }
 }
 
 /**
  * POST /api/auth/verify-otp
- * Verifies the OTP and finalizes account creation. Returns JWT.
+ * Verifies the bcrypt hash of the OTP in Redis, creates/updates user, and issues secure session tokens.
  */
 async function verifyOtpHandler(req, res) {
+  const { email, otp } = req.body;
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || null;
+  const userAgent = req.headers['user-agent'] || 'Unknown Client';
+
   try {
-    const { email, otp } = req.body;
-
     if (!email || !otp) {
-      return res.status(400).json({ error: 'Email and OTP are required.' });
+      return res.status(400).json({ error: 'Email and verification code are required.' });
     }
 
-    const { valid, reason, entry } = verifyStoredOTP(email, otp);
-    if (!valid) {
-      return res.status(400).json({ error: reason });
+    // 1. Verify OTP with Redis Service
+    const check = await otpService.verifyStoredOTP(email, otp);
+    if (!check.valid) {
+      await logAuthEvent(email, 'otp_verify_failed', false, req);
+      return res.status(400).json({ error: check.reason });
     }
 
-    // Clean up OTP
-    otpStore.delete(email.toLowerCase());
+    const { entry } = check;
 
-    // Find or create user
-    let user = await prisma.user.findUnique({ where: { email } });
+    // 2. Load or create user in DB
+    let user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() }
+    });
 
     if (!user) {
+      // Create user (Sign up flow completes)
       user = await prisma.user.create({
         data: {
-          email,
-          name: entry.name || email.split('@')[0],
+          email: email.toLowerCase().trim(),
+          name: entry.metadata.name || email.split('@')[0],
           oauthProvider: 'email',
-          lastLogin: new Date(),
-        },
+          emailVerified: true,
+          lastLogin: new Date()
+        }
       });
+      await logAuthEvent(email, 'signup_success', true, req);
     } else {
+      // Existing user (Login flow completes)
       user = await prisma.user.update({
         where: { id: user.id },
         data: {
-          name: entry.name || user.name,
-          lastLogin: new Date(),
-        },
+          emailVerified: true,
+          lastLogin: new Date()
+        }
       });
+      await logAuthEvent(email, 'login_success', true, req);
     }
 
-    const token = generateToken({ id: user.id, email: user.email });
+    // 3. Issue Session Tokens
+    const accessToken = tokenService.generateAccessToken(user);
+    const refreshToken = await tokenService.createSession(user.id, clientIp, { userAgent });
+
+    // 4. Record successful audit event
+    await logAuthEvent(email, 'otp_verify_success', true, req);
 
     res.json({
-      token,
+      token: accessToken,
+      refreshToken,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        plan: user.plan || 'free',
-      },
+        plan: user.plan || 'free'
+      }
     });
   } catch (error) {
     console.error('[VerifyOTP] Error:', error);
@@ -224,31 +220,100 @@ async function verifyOtpHandler(req, res) {
 
 /**
  * POST /api/auth/resend-otp
- * Resends the OTP to the given email.
+ * Handles resending OTP, respecting cooldowns and throttling.
  */
 async function resendOtp(req, res) {
-  try {
-    const { email } = req.body;
+  const { email, type = 'login' } = req.body;
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || null;
+  const userAgent = req.headers['user-agent'] || 'Unknown Client';
 
+  try {
     if (!email) {
       return res.status(400).json({ error: 'Email is required.' });
     }
 
-    const existing = otpStore.get(email.toLowerCase());
-    const name = existing?.name || '';
+    // 1. Cooldown check
+    const isCooled = await otpService.checkResendCooldown(email);
+    if (isCooled) {
+      return res.status(429).json({ error: 'Verification code resent too quickly. Please wait 60 seconds.' });
+    }
 
-    const otp = generateOTP();
-    storeOTP(email, otp, { name, password: existing?.password });
+    // 2. Fetch existing session to maintain same metadata
+    const redisKey = `otp:auth:${email.toLowerCase().trim()}`;
+    const entryStr = await otpService.verifyStoredOTP(email, ''); // Let verification trigger check
+    
+    // Fallback if session expired, we'll generate brand new
+    const otp = otpService.generateOTP();
+    await otpService.storeOTP(email, otp, type);
+    await otpService.setResendCooldown(email);
 
-    await sendOTPEmail(email, otp, name);
+    // 3. Dispatch to BullMQ Queue
+    await otpMailQueue.add('send-otp', {
+      email,
+      otp,
+      name: '',
+      type,
+      ipAddress: clientIp,
+      deviceInfo: userAgent
+    });
 
-    res.json({ 
-      message: 'Verification code sent.',
+    await logAuthEvent(email, 'otp_resend', true, req);
+
+    res.json({
+      message: 'A fresh verification code has been dispatched.',
       devOtp: process.env.NODE_ENV === 'development' ? otp : undefined
     });
   } catch (error) {
     console.error('[ResendOTP] Error:', error);
-    res.status(500).json({ error: 'Failed to resend OTP. Please try again.' });
+    res.status(500).json({ error: 'Failed to resend verification code. Please try again.' });
+  }
+}
+
+/**
+ * POST /api/auth/refresh
+ * Performs safe Refresh Token Rotation.
+ */
+async function refreshSession(req, res) {
+  const { refreshToken } = req.body;
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || null;
+  const userAgent = req.headers['user-agent'] || 'Unknown Client';
+
+  try {
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token is required.' });
+    }
+
+    const rotated = await tokenService.rotateSession(refreshToken, clientIp, { userAgent });
+    
+    await logAuthEvent(rotated.user.email, 'session_refresh', true, req);
+
+    res.json(rotated);
+  } catch (error) {
+    console.error('[RefreshToken] Error:', error.message);
+    res.status(401).json({ error: error.message || 'Session refresh failed.' });
+  }
+}
+
+/**
+ * POST /api/auth/logout
+ * Revokes the database-backed refresh session.
+ */
+async function logout(req, res) {
+  const { refreshToken } = req.body;
+
+  try {
+    if (refreshToken) {
+      await tokenService.revokeSession(refreshToken);
+    }
+    
+    if (req.user?.email) {
+      await logAuthEvent(req.user.email, 'logout', true, req);
+    }
+
+    res.json({ message: 'Logged out successfully.' });
+  } catch (error) {
+    console.error('[Logout] Error:', error);
+    res.status(500).json({ error: 'Logout failed.' });
   }
 }
 
@@ -256,4 +321,6 @@ module.exports = {
   registerAndSendOtp,
   verifyOtpHandler,
   resendOtp,
+  refreshSession,
+  logout
 };

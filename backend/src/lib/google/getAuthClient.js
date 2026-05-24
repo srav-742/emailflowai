@@ -7,6 +7,15 @@ const {
   isGoogleRefreshTokenInvalid,
 } = require('../../services/googleConnectionService');
 
+function decryptIfEncrypted(value) {
+  if (!value) return null;
+  try {
+    return decrypt(value);
+  } catch (_) {
+    return value;
+  }
+}
+
 /**
  * Returns an authenticated Google OAuth2 client for a specific user and email.
  * Automatically refreshes the token if it's within 5 minutes of expiry.
@@ -57,8 +66,8 @@ async function getAuthClient(userId, email) {
     process.env.GOOGLE_REDIRECT_URI || `http://localhost:${process.env.PORT || 5050}/api/auth/gmail/callback`
   );
 
-  const accessToken = decrypt(tokenRecord.accessToken);
-  const refreshToken = decrypt(tokenRecord.refreshToken);
+  const accessToken = decryptIfEncrypted(tokenRecord.accessToken);
+  const refreshToken = decryptIfEncrypted(tokenRecord.refreshToken);
 
   oauth2Client.setCredentials({
     access_token: accessToken,
@@ -95,10 +104,11 @@ async function getAuthClient(userId, email) {
             provider: 'google',
           },
           data: {
-            accessToken: nextAccessToken,
-            refreshToken: nextRefreshToken,
+            accessToken: encrypt(nextAccessToken),
+            refreshToken: encrypt(nextRefreshToken),
             tokenExpiry: nextTokenExpiry,
             syncEnabled: true,
+            requiresReconnect: false,
           },
         });
 
@@ -108,8 +118,8 @@ async function getAuthClient(userId, email) {
             email,
           },
           data: {
-            accessToken: nextAccessToken,
-            refreshToken: nextRefreshToken,
+            accessToken: encrypt(nextAccessToken),
+            refreshToken: encrypt(nextRefreshToken),
             tokenExpiry: nextTokenExpiry,
             gmailConnectedAt: new Date(),
           },
@@ -143,13 +153,15 @@ async function getAuthClient(userId, email) {
  */
 async function migrateAndGetClient(userId, email, legacyAccount) {
   console.log(`[OAuth] Migrating tokens for ${email} to encrypted storage...`);
+  const accessToken = decryptIfEncrypted(legacyAccount.accessToken);
+  const refreshToken = decryptIfEncrypted(legacyAccount.refreshToken);
 
   await prisma.oAuthToken.create({
     data: {
       userId,
       email,
-      accessToken: encrypt(legacyAccount.accessToken),
-      refreshToken: encrypt(legacyAccount.refreshToken),
+      accessToken: encrypt(accessToken),
+      refreshToken: encrypt(refreshToken),
       tokenExpiry: legacyAccount.tokenExpiry || new Date(Date.now() + 3600 * 1000), // Default 1h if missing
       scope: legacyAccount.scope || [
         'https://www.googleapis.com/auth/gmail.readonly',

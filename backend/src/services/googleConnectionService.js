@@ -22,6 +22,7 @@ function isGoogleRefreshTokenInvalid(error) {
 
   return (
     text.includes('invalid_grant') ||
+    text.includes('unauthorized_client') ||
     text.includes('token has been expired or revoked') ||
     text.includes('token has expired or been revoked') ||
     text.includes('revoked')

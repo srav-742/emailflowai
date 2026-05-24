@@ -23,6 +23,7 @@ export const AuthProvider = ({ children }) => {
 
   const clearSession = useCallback(() => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
     setToken(null);
     setUser(null);
     setLocalGmailReconnectState(clearGmailReconnectState());
@@ -122,7 +123,8 @@ export const AuthProvider = ({ children }) => {
 
   const logout = useCallback(async () => {
     try {
-      await authAPI.logout();
+      const storedRefreshToken = localStorage.getItem('refreshToken');
+      await authAPI.logout(storedRefreshToken);
       await signOut(auth);
     } catch (error) {
       // Ignore errors during logout

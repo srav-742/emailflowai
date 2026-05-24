@@ -2,10 +2,19 @@ const prisma = require('../config/database');
 const { verifyIdToken } = require('../utils/firebase');
 const { generateToken } = require('../utils/jwt');
 const { getUserInfo } = require('../utils/gmailOAuth');
-const { encrypt } = require('../utils/encryption');
+const { decrypt, encrypt } = require('../utils/encryption');
 const { msalClient } = require('../config/msalConfig');
 const { syncOutlookEmails } = require('../services/outlookSyncService');
 const { hasGoogleConnection } = require('../services/googleConnectionService');
+
+function decryptIfEncrypted(value) {
+  if (!value) return null;
+  try {
+    return decrypt(value);
+  } catch (_) {
+    return value;
+  }
+}
 
 // Clerk (optional — only available when CLERK_SECRET_KEY is set)
 let verifyClerkToken = null;
@@ -110,22 +119,25 @@ async function persistGmailTokens(userId, tokens) {
     }),
   ]);
 
+  const existingAccountAccessToken = decryptIfEncrypted(existingEmailAccount?.accessToken);
+  const existingAccountRefreshToken = decryptIfEncrypted(existingEmailAccount?.refreshToken);
+  const existingOAuthAccessToken = decryptIfEncrypted(existingOAuthToken?.accessToken);
+  const existingOAuthRefreshToken = decryptIfEncrypted(existingOAuthToken?.refreshToken);
+  const existingUserAccessToken = decryptIfEncrypted(existingUser.accessToken);
+  const existingUserRefreshToken = decryptIfEncrypted(existingUser.refreshToken);
+
   const nextAccessToken =
     tokens.access_token ??
-    existingEmailAccount?.accessToken ??
-    (isPrimaryIdentity ? existingUser.accessToken : null);
+    existingOAuthAccessToken ??
+    existingAccountAccessToken ??
+    (isPrimaryIdentity ? existingUserAccessToken : null);
   const nextRefreshToken =
     tokens.refresh_token ??
-    existingEmailAccount?.refreshToken ??
-    (isPrimaryIdentity ? existingUser.refreshToken : null);
-  const nextEncryptedAccessToken =
-    (nextAccessToken ? encrypt(nextAccessToken) : null) ??
-    existingOAuthToken?.accessToken ??
-    null;
-  const nextEncryptedRefreshToken =
-    (tokens.refresh_token ? encrypt(tokens.refresh_token) : null) ??
-    existingOAuthToken?.refreshToken ??
-    (isPrimaryIdentity && existingUser.refreshToken ? encrypt(existingUser.refreshToken) : null);
+    existingOAuthRefreshToken ??
+    existingAccountRefreshToken ??
+    (isPrimaryIdentity ? existingUserRefreshToken : null);
+  const nextEncryptedAccessToken = nextAccessToken ? encrypt(nextAccessToken) : null;
+  const nextEncryptedRefreshToken = nextRefreshToken ? encrypt(nextRefreshToken) : null;
   const nextTokenExpiry =
     (tokens.expiry_date ? new Date(tokens.expiry_date) : null) ??
     existingEmailAccount?.tokenExpiry ??
@@ -147,8 +159,8 @@ async function persistGmailTokens(userId, tokens) {
     data: {
       ...(isPrimaryIdentity
         ? {
-            accessToken: nextAccessToken,
-            refreshToken: nextRefreshToken,
+            accessToken: nextEncryptedAccessToken,
+            refreshToken: nextEncryptedRefreshToken,
             tokenExpiry: nextTokenExpiry,
           }
         : {}),
@@ -166,22 +178,26 @@ async function persistGmailTokens(userId, tokens) {
     },
     update: {
       userId,
-      accessToken: nextAccessToken,
-      refreshToken: nextRefreshToken,
+      accessToken: nextEncryptedAccessToken,
+      refreshToken: nextEncryptedRefreshToken,
       tokenExpiry: nextTokenExpiry,
       displayName: userInfo.name || accountEmail.split('@')[0],
       syncEnabled: true,
+      connectionType: 'oauth',
+      requiresReconnect: false,
     },
     create: {
       userId,
       provider: 'google',
       email: accountEmail,
-      accessToken: nextAccessToken,
-      refreshToken: nextRefreshToken,
+      accessToken: nextEncryptedAccessToken,
+      refreshToken: nextEncryptedRefreshToken,
       tokenExpiry: nextTokenExpiry,
       displayName: userInfo.name || accountEmail.split('@')[0],
       isPrimary: accountEmail === updatedUser.email,
       syncEnabled: true,
+      connectionType: 'oauth',
+      requiresReconnect: false,
     },
   });
 
@@ -220,6 +236,11 @@ async function persistGmailTokens(userId, tokens) {
     const { gmailQueue } = require('../queues/gmail.queue');
     await gmailQueue.add('sync-inbox', {
       type: 'sync-inbox',
+      userId,
+      accountId: emailAccount.id,
+    });
+    await gmailQueue.add('sync-calendar', {
+      type: 'sync-calendar',
       userId,
       accountId: emailAccount.id,
     });

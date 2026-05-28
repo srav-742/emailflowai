@@ -134,8 +134,7 @@ async function registerAndSendOtp(req, res) {
     console.log(`🚀 [Auth API] Queued OTP delivery job for ${email}`);
 
     res.json({
-      message: 'Verification code successfully sent to your inbox.',
-      devOtp: process.env.NODE_ENV === 'development' ? otp : undefined
+      message: 'Verification code successfully sent to your inbox.'
     });
   } catch (error) {
     console.error('[RequestOTP] Error:', error);
@@ -260,8 +259,7 @@ async function resendOtp(req, res) {
     await logAuthEvent(email, 'otp_resend', true, req);
 
     res.json({
-      message: 'A fresh verification code has been dispatched.',
-      devOtp: process.env.NODE_ENV === 'development' ? otp : undefined
+      message: 'A fresh verification code has been dispatched.'
     });
   } catch (error) {
     console.error('[ResendOTP] Error:', error);

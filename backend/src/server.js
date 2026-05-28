@@ -82,6 +82,9 @@ async function initBackgroundServices() {
   // startEmailPolling(io);
   // startStyleLearningJob();
   
+  // Start the workers in this process to process background jobs (e.g. OTP emails)
+  require('./workers/index.js');
+  
   await initRepeatableJobs();
 }
 

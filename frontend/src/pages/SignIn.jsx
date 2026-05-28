@@ -23,7 +23,7 @@ const OTP_LENGTH = 6;
 
 const SignIn = () => {
   const navigate = useNavigate();
-  const { loginWithGoogle } = useAuth();
+  const { loginWithGoogle, setToken } = useAuth();
 
   // Authentication Mode States
   const [step, setStep] = useState(1);
@@ -155,12 +155,13 @@ const SignIn = () => {
       if (refreshToken) {
         localStorage.setItem('refreshToken', refreshToken);
       }
+      setToken(token);
 
       setSuccessMsg('Verification successful! Securing session…');
 
       setTimeout(() => {
         setSuccessMsg(null);
-        window.location.href = '/dashboard';
+        navigate('/dashboard');
       }, 1200);
     } catch (err) {
       const msg = err?.response?.data?.error || err.message || 'Incorrect verification code. Please try again.';

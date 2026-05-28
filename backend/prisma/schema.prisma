@@ -54,6 +54,7 @@ model User {
   billingCustomer   BillingCustomer?
   invoices          Invoice[]
   usageMetrics      UsageMetric[]
+  documents         Document[]
 
   @@map("users")
 }
@@ -621,3 +622,38 @@ model ProcessedWebhook {
 
   @@map("processed_webhooks")
 }
+
+model Document {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  fileName        String   @map("file_name")
+  mimeType        String   @map("mime_type")
+  storageUrl      String?  @map("storage_url")
+  documentType    String   @map("document_type")
+  extractedText   String?  @map("extracted_text")
+  metadata        Json?
+  embeddingStatus String?  @map("embedding_status")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks          DocumentChunk[]
+
+  @@index([userId])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  chunkText  String   @map("chunk_text")
+  embedding  Json?
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("document_chunks")
+}
+

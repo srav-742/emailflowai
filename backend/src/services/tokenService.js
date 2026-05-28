@@ -119,10 +119,36 @@ async function revokeAllUserSessions(userId) {
   });
 }
 
+async function getAuthenticatedGmailClient(userId, accountId = null) {
+  let credentials;
+
+  if (accountId) {
+    credentials = await prisma.emailAccount.findUnique({
+      where: { id: accountId },
+      select: { accessToken: true, refreshToken: true }
+    });
+  }
+
+  if (!credentials || (!credentials.accessToken && !credentials.refreshToken)) {
+    credentials = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { accessToken: true, refreshToken: true }
+    });
+  }
+
+  if (!credentials || (!credentials.accessToken && !credentials.refreshToken)) {
+    throw new Error('No Google OAuth credentials found for user.');
+  }
+
+  const { getGmailClient } = require('../utils/gmailOAuth');
+  return getGmailClient(credentials.accessToken, credentials.refreshToken);
+}
+
 module.exports = {
   generateAccessToken,
   createSession,
   rotateSession,
   revokeSession,
-  revokeAllUserSessions
+  revokeAllUserSessions,
+  getAuthenticatedGmailClient
 };

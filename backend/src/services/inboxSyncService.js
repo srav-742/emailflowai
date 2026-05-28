@@ -538,19 +538,29 @@ async function syncInboxInternal(userId, maxResults = 35, options = {}) {
           const { trackEvent } = require('./analyticsService');
           trackEvent(userId, 'email_processed', { emailId: result.email.id });
 
-          // Process attachments for new emails
-          if (payload.attachmentParts?.length > 0) {
-            payload.attachmentParts.forEach(part => {
-              saveAttachment(gmail, payload.messageId, part).catch(err => {
-                console.error('[Sync] Attachment save failed:', err.message);
-              });
-            });
-          }
-
           // Score priority for new emails
           scoreEmailPriority(result.email.id).catch(err => {
             console.error('[Sync] Priority scoring failed:', err.message);
           });
+        }
+
+        // Process attachments for both new emails and existing emails that have attachments in Gmail but none in our DB
+        if (payload.attachmentParts?.length > 0) {
+          try {
+            const savedAttachmentsCount = await prisma.attachment.count({
+              where: { emailId: result.email.id }
+            });
+
+            if (result.isNew || savedAttachmentsCount === 0) {
+              payload.attachmentParts.forEach(part => {
+                saveAttachment(gmail, payload.messageId, part, userId).catch(err => {
+                  console.error('[Sync] Attachment save failed:', err.message);
+                });
+              });
+            }
+          } catch (attErr) {
+            console.error('[Sync] Failed to process attachments lookup:', attErr.message);
+          }
         }
       } catch (error) {
         skippedMessages += 1;

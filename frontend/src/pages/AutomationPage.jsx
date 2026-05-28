@@ -403,7 +403,7 @@ const AutomationPage = () => {
                     simulationReport.expectedActions.map((act, idx) => (
                       <div key={idx} className="simulation-log-row success">
                         <span>[MATCHED]</span>
-                        <span>Email: "{act.subject}" -> {act.details}</span>
+                        <span>Email: "{act.subject}" {"->"} {act.details}</span>
                       </div>
                     ))
                   )}

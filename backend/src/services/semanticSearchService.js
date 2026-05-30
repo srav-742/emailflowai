@@ -6,26 +6,6 @@ const VECTOR_LENGTH = 384;
 let embeddingTableReady = false;
 
 async function ensureEmbeddingTable() {
-  if (embeddingTableReady) {
-    return;
-  }
-
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS email_embeddings (
-      id TEXT PRIMARY KEY,
-      email_id TEXT NOT NULL UNIQUE REFERENCES emails(id) ON DELETE CASCADE ON UPDATE CASCADE,
-      subject_vector JSONB NOT NULL,
-      body_vector JSONB NOT NULL,
-      thread_vector JSONB NOT NULL,
-      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  await prisma.$executeRawUnsafe(`
-    CREATE INDEX IF NOT EXISTS email_embeddings_email_id_idx
-    ON email_embeddings(email_id);
-  `);
-
   embeddingTableReady = true;
 }
 
@@ -218,6 +198,8 @@ async function semanticSearch(query, userId, options = {}) {
       FROM email_embeddings ee
       INNER JOIN emails e ON e.id = ee.email_id
       WHERE e.user_id = $1
+      ORDER BY e.received_at DESC
+      LIMIT 500
     `,
     userId
   );

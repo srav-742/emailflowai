@@ -77,14 +77,38 @@ export const AuthProvider = ({ children }) => {
     }
   }, [token, refreshProfile]);
 
+  // Synchronize active user sessions for Multi-Login Switching
+  useEffect(() => {
+    if (user && token) {
+      const savedSessions = JSON.parse(localStorage.getItem('savedSessions') || '[]');
+      const filtered = savedSessions.filter(s => s.user?.email !== user.email);
+      filtered.push({
+        token,
+        refreshToken: localStorage.getItem('refreshToken'),
+        user
+      });
+      localStorage.setItem('savedSessions', JSON.stringify(filtered));
+    }
+  }, [user, token]);
+
   useEffect(() => {
     const handleReconnectEvent = (event) => {
       setLocalGmailReconnectState(event?.detail || { required: false, message: '', email: null, source: null, timestamp: null });
     };
 
+    const handleSessionExpired = () => {
+      console.warn('[Auth] Session refresh failed or expired. Cleaning credentials.');
+      clearSession();
+    };
+
     window.addEventListener(GMAIL_RECONNECT_EVENT, handleReconnectEvent);
-    return () => window.removeEventListener(GMAIL_RECONNECT_EVENT, handleReconnectEvent);
-  }, []);
+    window.addEventListener('auth:session_expired', handleSessionExpired);
+    
+    return () => {
+      window.removeEventListener(GMAIL_RECONNECT_EVENT, handleReconnectEvent);
+      window.removeEventListener('auth:session_expired', handleSessionExpired);
+    };
+  }, [clearSession]);
 
   const authenticateWithGoogle = useCallback(async () => {
     try {

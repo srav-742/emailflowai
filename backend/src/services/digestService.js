@@ -13,17 +13,34 @@ async function generateDailyDigest(userId) {
 
     // 1. Gather Data
     const [emails, actions, followups, calendarEvents, preferences] = await Promise.all([
-      // Unread important emails from last 24h
-      prisma.email.findMany({
-        where: {
-          userId,
-          isRead: false,
-          priority: { in: ['high', 'normal'] },
-          receivedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-        },
-        take: 5,
-        select: { subject: true, senderName: true, priority: true }
-      }),
+      // Get recent unread important emails, falling back to absolute latest emails if few are found
+      (async () => {
+        let recent = await prisma.email.findMany({
+          where: {
+            userId,
+            isRead: false,
+            priority: { in: ['high', 'normal'] },
+            receivedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+          },
+          take: 5,
+          select: { subject: true, senderName: true, priority: true }
+        });
+        if (recent.length < 5) {
+          const fallback = await prisma.email.findMany({
+            where: { userId },
+            orderBy: { receivedAt: 'desc' },
+            take: 5,
+            select: { subject: true, senderName: true, priority: true }
+          });
+          const seen = new Set(recent.map(e => (e.subject || '') + (e.senderName || '')));
+          for (const item of fallback) {
+            if (!seen.has((item.subject || '') + (item.senderName || '')) && recent.length < 5) {
+              recent.push(item);
+            }
+          }
+        }
+        return recent;
+      })(),
       // Pending action items due today or overdue
       prisma.actionItem.findMany({
         where: {

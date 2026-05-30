@@ -11,6 +11,21 @@ const DocumentIntelligencePage = () => {
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [searchResults, setSearchResults] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [syncingEmails, setSyncingEmails] = useState(false);
+
+  const handleSyncEmailAttachments = async () => {
+    try {
+      setSyncingEmails(true);
+      setError(null);
+      await documentAPI.syncEmails();
+      await fetchDocuments();
+    } catch (err) {
+      console.error('Email attachment sync failed:', err);
+      setError('Failed to scan and analyze email attachments.');
+    } finally {
+      setSyncingEmails(false);
+    }
+  };
 
   // Load history list on mount
   useEffect(() => {
@@ -261,7 +276,52 @@ const DocumentIntelligencePage = () => {
               <span className="eyebrow" style={{ color: 'var(--neon-violet)' }}>Telemetry Index</span>
               <h3>Document Archive</h3>
             </div>
-            <button className="refresh-btn" onClick={fetchDocuments} title="Refresh Archive">🔄</button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button 
+                onClick={handleSyncEmailAttachments} 
+                disabled={syncingEmails}
+                className="button"
+                style={{ 
+                  padding: '6px 12px', 
+                  fontSize: '11px', 
+                  background: syncingEmails ? 'rgba(139, 111, 255, 0.1)' : 'rgba(139, 111, 255, 0.05)', 
+                  border: '1px solid rgba(139, 111, 255, 0.35)', 
+                  borderRadius: '8px',
+                  color: 'var(--neon-violet)',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: syncingEmails ? '0 0 10px rgba(139, 111, 255, 0.2)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  if (!syncingEmails) {
+                    e.currentTarget.style.background = 'rgba(139, 111, 255, 0.15)';
+                    e.currentTarget.style.boxShadow = '0 0 10px rgba(139, 111, 255, 0.15)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!syncingEmails) {
+                    e.currentTarget.style.background = 'rgba(139, 111, 255, 0.05)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }
+                }}
+              >
+                {syncingEmails ? (
+                  <>
+                    <span className="app-loading-spinner" style={{ width: '12px', height: '12px', border: '2px solid rgba(139,111,255,0.2)', borderTopColor: 'var(--neon-violet)' }}></span>
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <span>🔌</span> Ingest Email Docs
+                  </>
+                )}
+              </button>
+              <button className="refresh-btn" onClick={fetchDocuments} title="Refresh Archive" style={{ margin: 0, padding: '6px 10px', fontSize: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-glass)', borderRadius: '8px', cursor: 'pointer' }}>🔄</button>
+            </div>
           </div>
 
           {/* Quick Filter Menu */}

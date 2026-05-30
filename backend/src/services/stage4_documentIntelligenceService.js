@@ -27,54 +27,7 @@ let tablesReady = false;
  * Dynamic DB Initialization for Stage 4 Document Tables
  */
 async function ensureDocumentTables() {
-  if (tablesReady) return;
-  try {
-    // 1. Create documents table
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS documents (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
-        file_name TEXT NOT NULL,
-        mime_type TEXT NOT NULL,
-        storage_url TEXT,
-        document_type TEXT,
-        extracted_text TEXT,
-        metadata JSONB,
-        embedding_status TEXT NOT NULL DEFAULT 'pending',
-        created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // 2. Create document_chunks table
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS document_chunks (
-        id TEXT PRIMARY KEY,
-        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE ON UPDATE CASCADE,
-        chunk_text TEXT NOT NULL,
-        embedding JSONB,
-        metadata JSONB,
-        created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // 3. Setup index matrices
-    await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS documents_user_id_idx ON documents(user_id);
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS documents_document_type_idx ON documents(document_type);
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS document_chunks_document_id_idx ON document_chunks(document_id);
-    `);
-
-    tablesReady = true;
-    console.log('✅ [DocumentIntelligence] Database tables initialized successfully.');
-  } catch (err) {
-    console.error('❌ [DocumentIntelligence] Failed to initialize database tables:', err.message);
-    throw err;
-  }
+  tablesReady = true;
 }
 
 /**
@@ -354,12 +307,14 @@ class DocumentIntelligenceService {
     const queryVector = await generateEmbedding(query);
     const limit = Number(options.limit) || 12;
 
-    // Fetch all document chunk parameters for this specific tenant Isolation
+    // Fetch all document chunk parameters with a robust 500-candidate performance limit
     const rows = await prisma.$queryRawUnsafe(
       `SELECT dc.id, dc.document_id AS "documentId", dc.chunk_text AS "chunkText", dc.embedding, d.file_name AS "fileName", d.document_type AS "documentType"
        FROM document_chunks dc
        INNER JOIN documents d ON d.id = dc.document_id
-       WHERE d.user_id = $1`,
+       WHERE d.user_id = $1
+       ORDER BY dc.created_at DESC
+       LIMIT 500`,
       userId
     );
 

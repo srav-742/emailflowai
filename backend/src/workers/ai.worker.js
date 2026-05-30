@@ -10,6 +10,7 @@
 const { Worker } = require('bullmq');
 const { redisConnection } = require('../config/redis');
 const prisma = require('../config/database');
+const { attachWorkerReliability, defaultWorkerOptions } = require('./workerReliability');
 
 const aiWorker = new Worker(
   'ai-processing',
@@ -91,42 +92,15 @@ const aiWorker = new Worker(
   {
     connection: redisConnection,
     concurrency: 5,  // Process up to 5 AI jobs concurrently
+    ...defaultWorkerOptions,
   }
 );
 
-// --- Event Handlers ---
-
-aiWorker.on('completed', (job, result) => {
-  console.log(`✅ [AI Worker] Job completed: ${job.id} | Type: ${job.name}`, result);
-});
-
-aiWorker.on('failed', async (job, err) => {
-  console.error(`❌ [AI Worker] Job failed: ${job?.id} | Attempt: ${job?.attemptsMade}/${job?.opts?.attempts}`, err.message);
-
-  // Dead-letter queue handling: save failed jobs to database for later analysis
-  if (job && job.attemptsMade >= (job.opts?.attempts || 5)) {
-    console.error(`💀 [AI Worker] Job permanently failed (DLQ): ${job.id}`);
-
-    try {
-      await prisma.failedJob.create({
-        data: {
-          jobId: job.id,
-          queueName: 'ai-processing',
-          jobName: job.name,
-          payload: job.data,
-          error: err.message,
-          attempts: job.attemptsMade,
-        },
-      });
-      console.log(`📥 [AI Worker] Saved failed job ${job.id} to FailedJob table.`);
-    } catch (dbError) {
-      console.error(`❌ [AI Worker] Failed to save DLQ job to DB:`, dbError.message);
-    }
-  }
-});
-
-aiWorker.on('error', (err) => {
-  console.error('❌ [AI Worker] Worker error:', err.message);
+attachWorkerReliability(aiWorker, {
+  queueName: 'ai-processing',
+  workerName: 'ai-worker',
+  concurrency: 5,
+  attempts: 5,
 });
 
 module.exports = { aiWorker };

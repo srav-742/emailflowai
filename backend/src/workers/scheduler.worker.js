@@ -108,8 +108,8 @@ const schedulerWorker = new Worker(
 
         case 'style-learning': {
           console.log(`[Scheduler Worker] Running Style Learning Job`);
-          const { buildStyleProfile } = require('../services/styleService');
           const prisma = require('../config/database');
+          const { styleLearningQueue } = require('../queues/style-learning.queue');
           
           const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
           const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -124,8 +124,7 @@ const schedulerWorker = new Worker(
           });
 
           for (const user of usersToLearn) {
-            await buildStyleProfile(user.id);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await styleLearningQueue.add('build-profile', { type: 'build-profile', userId: user.id });
           }
           return { success: true, processed: 'style-learning', count: usersToLearn.length };
         }

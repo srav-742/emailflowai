@@ -19,6 +19,20 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
 api.interceptors.response.use(
   (response) => {
     if (response?.config?.url === '/auth/profile' && response?.data?.user?.hasGmailAccess) {
@@ -27,12 +41,69 @@ api.interceptors.response.use(
 
     return response;
   },
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
+
     if (isGmailReconnectError(error)) {
       setGmailReconnectState({
         message: error?.response?.data?.error || error?.message || 'Google access needs to be reconnected.',
         source: error?.config?.url || 'api',
       });
+    }
+
+    // Auto JWT Refresh on 401 Expiry
+    if (
+      error.response?.status === 401 &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !originalRequest.url?.includes('/auth/refresh') &&
+      !originalRequest.url?.includes('/auth/firebase-login')
+    ) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (refreshToken) {
+        try {
+          // Use direct axios post to bypass standard interceptor loop
+          const res = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
+          const { token: newToken, refreshToken: newRefreshToken } = res.data;
+
+          localStorage.setItem('token', newToken);
+          if (newRefreshToken) {
+            localStorage.setItem('refreshToken', newRefreshToken);
+          }
+
+          api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+
+          processQueue(null, newToken);
+          isRefreshing = false;
+
+          return api(originalRequest);
+        } catch (refreshError) {
+          processQueue(refreshError, null);
+          isRefreshing = false;
+
+          // Clear local credentials on authentication revocation
+          localStorage.removeItem('token');
+          localStorage.removeItem('refreshToken');
+          window.dispatchEvent(new Event('auth:session_expired'));
+
+          return Promise.reject(refreshError);
+        }
+      }
     }
 
     return Promise.reject(error);
@@ -109,6 +180,7 @@ export const digestAPI = {
   getToday: () => api.get('/digest/today'),
   getPreferences: () => api.get('/digest/preferences'),
   updatePreferences: (data) => api.patch('/digest/preferences', data),
+  generateDigest: () => api.post('/digest/generate'),
 };
 
 export const billingAPI = {
@@ -175,6 +247,7 @@ export const documentAPI = {
   get: (id) => api.get(`/documents/${id}`),
   search: (q) => api.get('/documents/search', { params: { q } }),
   delete: (id) => api.delete(`/documents/${id}`),
+  syncEmails: () => api.post('/documents/sync-emails'),
 };
 
 export const campaignAPI = {

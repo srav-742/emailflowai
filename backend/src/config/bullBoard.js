@@ -20,6 +20,9 @@ const { ExpressAdapter } = require('@bull-board/express');
 // Import all queues
 const { aiQueue } = require('../queues/ai.queue');
 const { gmailQueue } = require('../queues/gmail.queue');
+const { mailSyncQueue } = require('../queues/mail-sync.queue');
+const { briefingQueue } = require('../queues/briefing.queue');
+const { styleLearningQueue } = require('../queues/style-learning.queue');
 const { analyticsQueue } = require('../queues/analytics.queue');
 const { notificationQueue } = require('../queues/notification.queue');
 const { schedulerQueue } = require('../queues/scheduler.queue');
@@ -33,6 +36,9 @@ createBullBoard({
   queues: [
     new BullMQAdapter(aiQueue),
     new BullMQAdapter(gmailQueue),
+    new BullMQAdapter(mailSyncQueue),
+    new BullMQAdapter(briefingQueue),
+    new BullMQAdapter(styleLearningQueue),
     new BullMQAdapter(analyticsQueue),
     new BullMQAdapter(notificationQueue),
     new BullMQAdapter(schedulerQueue),

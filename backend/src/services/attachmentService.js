@@ -72,14 +72,15 @@ async function saveAttachment(gmail, emailId, part, userId) {
 
     // 4. Send to Document Intelligence Hub automatically
     if (userId) {
+      const tempFilePath = path.join(os.tmpdir(), `${Date.now()}_${filename.replace(/[^a-zA-Z0-9.-]/g, '_')}`);
       try {
-        const tempFilePath = path.join(os.tmpdir(), `${Date.now()}_${filename.replace(/[^a-zA-Z0-9.-]/g, '_')}`);
         await fs.promises.writeFile(tempFilePath, buffer);
         await DocumentIntelligenceService.processAttachment(tempFilePath, part.mimeType || 'application/octet-stream', userId, filename);
-        await fs.promises.unlink(tempFilePath).catch(() => {}); // cleanup
         console.log(`[AttachmentService] Automatically processed document intelligence for ${filename}`);
       } catch (docErr) {
         console.error(`[AttachmentService] Failed to process document intelligence for ${filename}:`, docErr.message);
+      } finally {
+        await fs.promises.unlink(tempFilePath).catch(() => {}); // cleanup guaranteed
       }
     }
   } catch (error) {

@@ -8,6 +8,7 @@
 const { Worker } = require('bullmq');
 const nodemailer = require('nodemailer');
 const { redisConnection } = require('../config/redis');
+const { attachWorkerReliability, defaultWorkerOptions } = require('./workerReliability');
 
 // Initialize Nodemailer pooled transporter
 let transporter = null;
@@ -238,15 +239,15 @@ const otpMailWorker = new Worker(
   {
     connection: redisConnection,
     concurrency: 5,
+    ...defaultWorkerOptions,
   }
 );
 
-otpMailWorker.on('completed', (job, result) => {
-  console.log(`✅ [OTP Worker] Job ${job.id} completed successfully.`, result);
-});
-
-otpMailWorker.on('failed', (job, err) => {
-  console.error(`❌ [OTP Worker] Job ${job?.id} failed with error:`, err.message);
+attachWorkerReliability(otpMailWorker, {
+  queueName: 'otp-mail-delivery',
+  workerName: 'otp-mail-worker',
+  concurrency: 5,
+  attempts: 5,
 });
 
 module.exports = { otpMailWorker };

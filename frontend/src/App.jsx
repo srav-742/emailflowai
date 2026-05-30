@@ -46,7 +46,7 @@ const PublicRoute = ({ children }) => {
 const HomeRoute = () => {
   const { token, loading } = useAuth();
   if (loading) return <LoadingScreen message="Preparing your workspace..." />;
-  return token ? <Navigate to="/dashboard" replace /> : <SignIn />;
+  return token ? <Navigate to="/dashboard" replace /> : <LandingPage />;
 };
 
 function App() {

@@ -32,8 +32,39 @@ const Dashboard = () => {
   const { accounts, selectedAccountId, setSelectedAccountId, fetchAccounts } = useAccounts();
   const navigate = useNavigate();
   
+  const [showSessionsDropdown, setShowSessionsDropdown] = useState(false);
+
+  const savedSessions = useMemo(() => {
+    try {
+      const all = JSON.parse(localStorage.getItem('savedSessions') || '[]');
+      return all.filter(s => s.user?.email && s.user.email !== user?.email);
+    } catch {
+      return [];
+    }
+  }, [user?.email]);
+
+  const handleSwitchSession = (session) => {
+    localStorage.setItem('token', session.token);
+    if (session.refreshToken) {
+      localStorage.setItem('refreshToken', session.refreshToken);
+    } else {
+      localStorage.removeItem('refreshToken');
+    }
+    window.location.reload();
+  };
+
+  const handleAddAccount = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    navigate('/login');
+  };
+
   const handleLogout = async () => {
     try {
+      const sessions = JSON.parse(localStorage.getItem('savedSessions') || '[]');
+      const filtered = sessions.filter(s => s.user?.email !== user?.email);
+      localStorage.setItem('savedSessions', JSON.stringify(filtered));
+
       await logout();
       navigate('/login');
     } catch (err) {
@@ -268,6 +299,11 @@ const Dashboard = () => {
       setProcessingAI(true);
       setNotice({ tone: 'ok', text: 'Running full AI intelligence scan...' });
       await emailAPI.aiProcessAll();
+      try {
+        await digestAPI.generateDigest();
+      } catch (digErr) {
+        console.warn('Manual digest generation failed, using cached brief:', digErr.message);
+      }
       await refreshWorkspace();
       setNotice({ tone: 'ok', text: 'Intelligence scan complete.' });
     } catch {
@@ -670,19 +706,173 @@ const Dashboard = () => {
             ➕ Link Account
           </button>
 
-          <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-glass)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
-              <div className="reader-avatar" style={{ width: 28, height: 28, fontSize: '10px' }}>
+          <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-glass)', paddingTop: '1.25rem', position: 'relative' }}>
+            
+            {/* Multi-Login Dropup Selector Menu */}
+            {showSessionsDropdown && (
+              <div 
+                style={{ 
+                  position: 'absolute', 
+                  bottom: '100%', 
+                  left: 0, 
+                  right: 0, 
+                  background: 'rgba(15, 20, 30, 0.95)', 
+                  border: '1px solid rgba(139, 111, 255, 0.35)', 
+                  borderRadius: '12px', 
+                  padding: '8px', 
+                  marginBottom: '10px', 
+                  boxShadow: '0 -8px 24px rgba(0, 0, 0, 0.5), 0 0 15px rgba(139, 111, 255, 0.1)',
+                  zIndex: 9999,
+                  backdropFilter: 'blur(20px)',
+                  animation: 'fadeInCockpit 0.2s ease-out'
+                }}
+              >
+                <div style={{ fontSize: '9px', fontWeight: 700, color: 'var(--neon-violet)', textTransform: 'uppercase', padding: '4px 8px 6px', borderBottom: '1px solid rgba(255,255,255,0.05)', letterSpacing: '0.05em' }}>
+                  👥 Identity Selector (Multi-Login)
+                </div>
+                
+                <div style={{ maxHeight: '150px', overflowY: 'auto', margin: '4px 0' }}>
+                  {savedSessions.length === 0 ? (
+                    <div style={{ padding: '8px', fontSize: '10px', color: 'var(--text-mute)', textAlign: 'center' }}>
+                      No other active sessions.
+                    </div>
+                  ) : (
+                    savedSessions.map((session, idx) => (
+                      <div 
+                        key={idx} 
+                        onClick={() => handleSwitchSession(session)}
+                        style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '8px', 
+                          padding: '6px 8px', 
+                          borderRadius: '8px', 
+                          cursor: 'pointer', 
+                          background: 'transparent',
+                          transition: 'background 0.2s'
+                        }}
+                        className="session-switch-item"
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div className="reader-avatar" style={{ width: 22, height: 22, fontSize: '9px', background: 'var(--neon-violet)', color: '#fff' }}>
+                          {session.user?.name ? session.user.name[0].toUpperCase() : 'U'}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#fff' }}>{session.user?.name}</div>
+                          <div style={{ fontSize: '8px', color: 'var(--text-mute)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{session.user?.email}</div>
+                        </div>
+                        <span style={{ fontSize: '10px', color: 'var(--neon-violet)' }}>🔌</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <button 
+                    onClick={handleAddAccount}
+                    style={{ 
+                      width: '100%', 
+                      padding: '6px 8px', 
+                      borderRadius: '8px', 
+                      fontSize: '10px', 
+                      background: 'rgba(61, 159, 255, 0.08)', 
+                      border: '1px solid rgba(61, 159, 255, 0.25)', 
+                      color: 'var(--neon-cyan)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <span>➕</span> Add Another Account
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Glowing Active User Card */}
+            <div 
+              onClick={() => setShowSessionsDropdown(!showSessionsDropdown)}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '10px', 
+                fontSize: '12px', 
+                background: 'rgba(255, 255, 255, 0.02)', 
+                border: '1px solid var(--border-glass)', 
+                borderRadius: '12px', 
+                padding: '10px', 
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                position: 'relative'
+              }}
+              className="premium-profile-tile"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.border = '1px solid rgba(139, 111, 255, 0.5)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(139, 111, 255, 0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.border = '1px solid var(--border-glass)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <div 
+                className="reader-avatar" 
+                style={{ 
+                  width: 32, 
+                  height: 32, 
+                  fontSize: '11px', 
+                  background: 'linear-gradient(135deg, var(--neon-blue) 0%, var(--neon-violet) 100%)',
+                  boxShadow: '0 0 8px rgba(139, 111, 255, 0.3)',
+                  border: '1px solid rgba(255,255,255,0.1)'
+                }}
+              >
                 {user?.name ? user.name[0].toUpperCase() : 'U'}
               </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>{user?.name || 'Executive User'}</div>
-                <div style={{ fontSize: '9px', color: 'var(--text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '120px' }}>{user?.email || 'admin@emailflow.ai'}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{user?.name || 'Executive User'}</span>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--neon-green)', boxShadow: '0 0 6px var(--neon-green)', display: 'inline-block' }}></span>
+                </div>
+                <div style={{ fontSize: '9px', color: 'var(--text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email || 'admin@emailflow.ai'}</div>
               </div>
+              <span style={{ fontSize: '10px', color: 'var(--text-mute)' }}>{showSessionsDropdown ? '▼' : '▲'}</span>
             </div>
-            <button className="button button-logout" style={{ padding: '8px', fontSize: '11px', width: '100%', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '10px', background: 'rgba(239, 68, 68, 0.05)', color: 'var(--neon-red)' }} onClick={handleLogout}>
-              Logout
+
+            <button 
+              className="button button-logout" 
+              style={{ 
+                padding: '8px', 
+                fontSize: '11px', 
+                width: '100%', 
+                border: '1px solid rgba(239, 68, 68, 0.35)', 
+                borderRadius: '10px', 
+                background: 'rgba(239, 68, 68, 0.08)', 
+                color: 'var(--neon-red)', 
+                marginTop: '10px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.2s'
+              }} 
+              onClick={handleLogout}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(239, 68, 68, 0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <span>📴</span> Logout Session
             </button>
+
           </div>
         </aside>
 

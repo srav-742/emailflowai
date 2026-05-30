@@ -97,6 +97,11 @@ model OAuthToken {
   refreshToken String   @map("refresh_token")
   tokenExpiry  DateTime @map("token_expiry")
   scope        String?
+  encryptedAccessToken  String?  @map("encrypted_access_token")
+  encryptedRefreshToken String?  @map("encrypted_refresh_token")
+  healthStatus          String   @default("healthy") @map("health_status")
+  lastHealthCheck       DateTime? @map("last_health_check")
+  syncStatus            String   @default("idle") @map("sync_status")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -229,6 +234,11 @@ model EmailAccount {
   accessToken      String?      @map("access_token")
   refreshToken     String?      @map("refresh_token")
   tokenExpiry      DateTime?    @map("token_expiry")
+  encryptedAccessToken  String?  @map("encrypted_access_token")
+  encryptedRefreshToken String?  @map("encrypted_refresh_token")
+  healthStatus          String   @default("healthy") @map("health_status")
+  lastHealthCheck       DateTime? @map("last_health_check")
+  syncStatus            String   @default("idle") @map("sync_status")
 
   // IMAP configuration (all passwords stored AES-256-GCM encrypted)
   imapHost         String?      @map("imap_host")
@@ -573,6 +583,7 @@ model AuthLog {
   success   Boolean
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([email])
   @@map("auth_logs")
 }
 
@@ -599,6 +610,7 @@ model Invoice {
 
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("invoices")
 }
 
@@ -612,6 +624,8 @@ model UsageMetric {
 
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
+  @@index([billingPeriodStart, billingPeriodEnd])
   @@map("usage_metrics")
 }
 

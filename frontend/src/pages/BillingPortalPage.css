@@ -1,0 +1,191 @@
+.billing-portal-shell {
+  padding: 40px;
+  max-width: 1000px;
+  margin: 0 auto;
+  font-family: 'Inter', sans-serif;
+  color: #fff;
+}
+
+.portal-header {
+  margin-bottom: 40px;
+}
+
+.portal-title {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+  background: linear-gradient(90deg, #fff, #a3a3a3);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.portal-subtitle {
+  color: #a3a3a3;
+  font-size: 1.1rem;
+}
+
+.portal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  margin-bottom: 40px;
+}
+
+.portal-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 30px;
+  backdrop-filter: blur(10px);
+}
+
+.card-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.subscription-details {
+  margin-bottom: 25px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+}
+
+.detail-label {
+  color: #888;
+}
+
+.detail-value {
+  font-weight: 500;
+}
+
+.status-badge {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.active {
+  background: rgba(46, 213, 115, 0.2);
+  color: #2ed573;
+}
+
+.status-badge.trialing {
+  background: rgba(255, 165, 2, 0.2);
+  color: #ffa502;
+}
+
+.status-badge.canceled {
+  background: rgba(255, 71, 87, 0.2);
+  color: #ff4757;
+}
+
+.portal-action-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  background: #3b82f6;
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.portal-action-btn:hover {
+  background: #2563eb;
+  transform: translateY(-2px);
+}
+
+.portal-action-btn:disabled {
+  background: #475569;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.usage-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.usage-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.usage-label {
+  font-size: 0.9rem;
+  color: #a3a3a3;
+  display: flex;
+  justify-content: space-between;
+}
+
+.usage-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.invoices-section {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 30px;
+}
+
+.invoices-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.invoices-table th,
+.invoices-table td {
+  padding: 15px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.invoices-table th {
+  color: #888;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.invoice-link {
+  color: #3b82f6;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.invoice-link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .portal-grid {
+    grid-template-columns: 1fr;
+  }
+}

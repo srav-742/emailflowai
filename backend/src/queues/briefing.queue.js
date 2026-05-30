@@ -1,0 +1,27 @@
+/**
+ * briefing.queue.js — BullMQ Queue for Briefing Jobs
+ *
+ * Handles:
+ *   - Morning brief generation
+ *   - Executive briefings
+ *
+ * Default retry: 5 attempts with exponential backoff starting at 5s.
+ */
+
+const { Queue } = require('bullmq');
+const { redisConnection } = require('../config/redis');
+
+const briefingQueue = new Queue('briefing', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: {
+      type: 'exponential',
+      delay: 5000,
+    },
+    removeOnComplete: 100,
+    removeOnFail: 50,
+  },
+});
+
+module.exports = { briefingQueue };

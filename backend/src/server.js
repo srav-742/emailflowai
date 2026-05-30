@@ -33,6 +33,7 @@ const pushRoutes = require('./routes/pushRoutes');
 const semanticRoutes = require('./routes/semanticRoutes');
 const semanticSearchRoutes = require('./routes/semanticSearchRoutes');
 const agentRoutes = require('./routes/agentRoutes');
+const oauthV2Routes = require('./routes/oauthV2Routes');
 const digestService = require('./services/digestService');
 const prisma = require('./config/database');
 const { verifyToken } = require('./utils/jwt');
@@ -206,9 +207,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
 }));
 
-// Security headers — use unsafe-none for COOP to allow Google OAuth popup communication
+// Security headers — use same-origin-allow-popups for COOP to allow Google OAuth popup communication
 app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });
@@ -279,6 +280,8 @@ app.use('/api/automation', require('./routes/automationRoutes'));
 app.use('/api/documents', require('./routes/documentRoutes'));
 app.use('/api/omnichannel', require('./routes/omnichannelRoutes'));
 app.use('/api/campaigns', require('./routes/campaignRoutes'));
+app.use('/api/monitoring', require('./routes/monitoringRoutes'));
+app.use('/api/v2/oauth', oauthV2Routes);
 
 
 // Transitioned: Analytics and Digest scheduling moved to BullMQ Scheduler in initRepeatableJobs.js

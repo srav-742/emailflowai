@@ -7,7 +7,8 @@ const {
   listDocuments,
   getDocument,
   searchDocuments,
-  deleteDocument
+  deleteDocument,
+  syncEmailAttachments
 } = require('../controllers/documentController');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../utils/asyncHandler');
@@ -30,6 +31,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.post('/upload', upload.single('file'), asyncHandler(uploadDocument));
+router.post('/sync-emails', asyncHandler(syncEmailAttachments));
 router.get('/', asyncHandler(listDocuments));
 router.get('/search', asyncHandler(searchDocuments));
 router.get('/:id', asyncHandler(getDocument));

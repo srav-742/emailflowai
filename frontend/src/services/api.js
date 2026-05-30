@@ -103,6 +103,15 @@ api.interceptors.response.use(
 
           return Promise.reject(refreshError);
         }
+      } else {
+        // CRITICAL FIX: If there's no refresh token, we MUST reset isRefreshing and flush the queue!
+        processQueue(error, null);
+        isRefreshing = false;
+        
+        localStorage.removeItem('token');
+        window.dispatchEvent(new Event('auth:session_expired'));
+        
+        return Promise.reject(error);
       }
     }
 
